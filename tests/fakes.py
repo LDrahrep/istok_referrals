@@ -49,3 +49,53 @@ class FakeSheet:
         values = self.get_all_values()
         index = values[0].index(header)
         return [row[index] for row in values[1:]]
+
+
+class FakeIo:
+    """Имитация Telegram для логики диалога: всё, что бот «сказал», складывается в списки."""
+
+    def __init__(self, files: dict[str, bytes] | None = None):
+        self.files = dict(files or {})
+        self.replies: list[tuple[str, list | None]] = []
+        self.admin_messages: list[tuple[str, list | None]] = []
+        self.admin_edits: list[tuple[tuple[int, int], str]] = []
+        self.user_messages: list[tuple[int, str, list | None]] = []
+        self.answered: list[str | None] = []
+        self.kicks = 0
+        self._next_message_id = 100
+
+    async def reply(self, text, buttons=None):
+        self.replies.append((text, buttons))
+
+    async def download(self, file_id):
+        if file_id not in self.files:
+            raise RuntimeError(f"download failed: {file_id}")
+        return self.files[file_id]
+
+    async def send_admin(self, text, buttons=None):
+        self.admin_messages.append((text, buttons))
+        self._next_message_id += 1
+        return (-100, self._next_message_id)
+
+    async def edit_admin(self, ref, text):
+        self.admin_edits.append((tuple(ref), text))
+
+    async def send_user(self, tg_user_id, text, buttons=None):
+        self.user_messages.append((tg_user_id, text, buttons))
+
+    async def answer_button(self, text=None):
+        self.answered.append(text)
+
+    def kick_background(self):
+        self.kicks += 1
+
+    @property
+    def last_text(self) -> str:
+        return self.replies[-1][0]
+
+    def texts(self) -> list[str]:
+        return [text for text, _ in self.replies]
+
+    def button_data(self, index: int = -1) -> list[str]:
+        buttons = self.replies[index][1] or []
+        return [data for row in buttons for _, data in row]
