@@ -37,19 +37,37 @@ function uploadPhotos() {
       var number = String(row[col.id]).trim();
       var fileId = String(row[col.fileId]).trim();
       if (!number || !fileId || String(row[col.photo]).trim()) continue;
-      var cell = sheet.getRange(r + 1, col.photo + 1);
+      var url = null, error = null;
       try {
         var baseName = number + ' ' + String(row[col.first]).trim() + ' ' + String(row[col.last]).trim();
-        cell.setValue(uploadOne_(token, folder, fileId, number, baseName));
-        cell.setNote('');
+        url = uploadOne_(token, folder, fileId, number, baseName);
       } catch (e) {
-        cell.setNote('Ошибка загрузки ' + new Date().toISOString() + ': ' + e.message);
+        error = e.message;
       }
       processed++;
+      // Пока шла загрузка, лист могли отсортировать или вставить строки — ищем строку заново по №.
+      var target = rowOf_(sheet, col.id, number, r + 1);
+      if (target < 0) continue;  // строку удалили во время загрузки: следующий запуск разберётся
+      var cell = sheet.getRange(target, col.photo + 1);
+      if (url) {
+        cell.setValue(url);
+        cell.setNote('');
+      } else {
+        cell.setNote('Ошибка загрузки ' + new Date().toISOString() + ': ' + error);
+      }
     }
   } finally {
     lock.releaseLock();
   }
+}
+
+function rowOf_(sheet, idCol, number, hint) {
+  if (hint <= sheet.getLastRow() && String(sheet.getRange(hint, idCol + 1).getValue()).trim() === number) return hint;
+  var ids = sheet.getRange(1, idCol + 1, sheet.getLastRow(), 1).getValues();
+  for (var i = 1; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === number) return i + 1;
+  }
+  return -1;
 }
 
 function uploadOne_(token, folder, fileId, number, baseName) {

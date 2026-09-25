@@ -46,6 +46,7 @@
 .venv/bin/pip install -r requirements-dev.txt
 docker run -d --name referrals-test-pg -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:16-alpine
 .venv/bin/pytest -q
+node --test tests/gas/photos.test.js   # GAS-скрипт на фейках Apps Script
 ```
 
 Запуск с тестовым ботом: положить переменные в `.env` (он в `.gitignore`), затем
