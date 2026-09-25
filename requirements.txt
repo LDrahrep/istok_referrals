@@ -8,3 +8,4 @@ phonenumbers==9.0.40
 zxing-cpp==3.1.1
 Pillow==12.3.0
 numpy==2.5.3
+tzdata==2026.4

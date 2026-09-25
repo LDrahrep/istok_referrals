@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import psycopg
 import pytest
 
 from referrals import repo
@@ -112,3 +113,13 @@ async def test_stale_photos_and_file_id_update(db):
 def test_photo_blob_rejects_empty():
     with pytest.raises(ValueError):
         PhotoBlob.from_bytes(b"", "image/jpeg")
+
+
+async def test_photo_failure_rolls_back_referral(db):
+    await seed_referrer(db)
+    await repo.save_session(db, Session(tg_user_id=111, step="ref_confirm", data={"keep": True}))
+    oversized = PhotoBlob.from_bytes(b"x" * (20 * 1024 * 1024 + 1), "image/jpeg")
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await repo.create_referral(db, make_draft(), oversized, menu_session())
+    assert await count(db, "referrals") == 0
+    assert (await repo.load_session(db, 111)).data == {"keep": True}
