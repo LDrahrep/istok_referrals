@@ -5,7 +5,7 @@ from collections.abc import Sequence
 
 from referrals.flow.events import User
 from referrals.flow.io import Buttons
-from referrals.models import Employee
+from referrals.models import Employee, Referral
 
 CARD_OBSOLETE = "Неактуально: сотрудник прошёл проверку сам."
 
@@ -35,3 +35,14 @@ def verify_request_buttons(user_id: int, matches: Sequence[Employee]) -> Buttons
 def id_taken_text(user: User, employee: Employee) -> str:
     return (f"⚠️ Попытка привязать {employee.name} ({employee.emplid}) с другого Telegram-аккаунта: "
             f"{_who(user)}. Если сотрудник сменил аккаунт — /unbind {employee.emplid}")
+
+
+def referral_caption(referral: Referral) -> str:
+    return "\n".join([
+        f"🆕 Заявка {referral.number}",
+        f"Кандидат: {referral.first_name} {referral.last_name}",
+        f"Телефон: {referral.phone}",
+        f"Почта: {referral.email}",
+        f"Работал у нас: {'Да' if referral.worked_before else 'Нет'}",
+        f"Рекомендовал: {referral.referrer_name} ({referral.referrer_emplid})",
+    ])
