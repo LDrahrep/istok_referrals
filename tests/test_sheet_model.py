@@ -1,0 +1,126 @@
+from datetime import datetime, timezone
+
+import pytest
+
+from referrals.sheet_model import (
+    BOT_HEADERS,
+    PHOTO_HEADER,
+    CellUpdate,
+    SheetLayoutError,
+    bot_cells,
+    build_row,
+    format_created,
+    parse_layout,
+    parse_number,
+    plan_reconcile,
+)
+from tests.factories import make_referral
+
+HEADER = [*BOT_HEADERS, PHOTO_HEADER, "Статус", "Заметки"]
+PHONE_COL = BOT_HEADERS.index("Телефон")
+
+
+def sheet_row(referral, photo="", status="", notes=""):
+    return [*bot_cells(referral).values(), photo, status, notes]
+
+
+def test_parse_layout_standard():
+    layout = parse_layout(HEADER)
+    assert layout.columns["№"] == 0
+    assert layout.columns[PHOTO_HEADER] == 10
+    assert layout.hr_columns == {"Статус": 11, "Заметки": 12}
+    assert layout.width == 13
+
+
+def test_parse_layout_any_order_and_spaces():
+    layout = parse_layout(["Заметки", f" {PHOTO_HEADER} ", *reversed(BOT_HEADERS)])
+    assert layout.columns["№"] == 11
+    assert layout.columns[PHOTO_HEADER] == 1
+    assert layout.hr_columns == {"Заметки": 0}
+
+
+def test_missing_header_is_error():
+    with pytest.raises(SheetLayoutError, match="Почта"):
+        parse_layout([h for h in HEADER if h != "Почта"])
+
+
+def test_duplicate_bot_header_is_error():
+    with pytest.raises(SheetLayoutError, match="Телефон"):
+        parse_layout([*HEADER, "Телефон"])
+
+
+def test_duplicate_hr_header_is_ignored():
+    assert "Статус" not in parse_layout([*HEADER, "Статус"]).hr_columns
+
+
+def test_format_created_uses_chicago_time():
+    assert format_created(datetime(2026, 9, 25, 19, 3, tzinfo=timezone.utc)) == "2026-09-25 14:03"
+    assert format_created(datetime(2026, 1, 15, 19, 3, tzinfo=timezone.utc)) == "2026-01-15 13:03"
+
+
+def test_bot_cells():
+    cells = bot_cells(make_referral(worked_before=False))
+    assert list(cells) == list(BOT_HEADERS)
+    assert cells["№"] == "R-000001"
+    assert cells["Работал у нас"] == "Нет"
+    assert cells["Дата"] == "2026-09-25 14:03"
+
+
+def test_build_row_follows_layout():
+    layout = parse_layout(["Заметки", *reversed(BOT_HEADERS), PHOTO_HEADER])
+    row = build_row(layout, make_referral())
+    assert len(row) == layout.width
+    assert row[layout.columns["Телефон"]] == "+16502530000"
+    assert row[0] == "" and row[layout.columns[PHOTO_HEADER]] == ""
+
+
+@pytest.mark.parametrize("cell,expected", [
+    ("R-000123", 123), (" R-000007 ", 7), ("R-0001234", 1234), ("R-12", None), ("123", None), ("", None),
+])
+def test_parse_number(cell, expected):
+    assert parse_number(cell) == expected
+
+
+def test_plan_appends_missing_rows():
+    r1, r2 = make_referral(1), make_referral(2, phone="+16502530001")
+    _, plan = plan_reconcile([HEADER], [r1, r2])
+    assert plan.appends == [r1, r2]
+    assert plan.cell_updates == [] and plan.feedback == {}
+
+
+def test_plan_is_empty_when_in_sync():
+    r1 = make_referral(1)
+    _, plan = plan_reconcile([HEADER, sheet_row(r1)], [r1])
+    assert (plan.appends, plan.cell_updates, plan.feedback) == ([], [], {})
+
+
+def test_plan_repairs_changed_cell():
+    r1 = make_referral(1)
+    row = sheet_row(r1)
+    row[PHONE_COL] = "6502530000"
+    _, plan = plan_reconcile([HEADER, row], [r1])
+    assert plan.cell_updates == [CellUpdate(1, PHONE_COL, "+16502530000")]
+
+
+def test_plan_reads_photo_and_hr_columns():
+    r1 = make_referral(1)
+    _, plan = plan_reconcile([HEADER, sheet_row(r1, photo="https://drive/x", status="Позвонили")], [r1])
+    assert plan.feedback == {1: ("https://drive/x", {"Статус": "Позвонили"})}
+
+
+def test_plan_reports_unknown_and_duplicate_rows():
+    r1 = make_referral(1)
+    values = [HEADER, sheet_row(r1), sheet_row(r1), ["R-000099"], ["мусор"]]
+    _, plan = plan_reconcile(values, [r1])
+    assert plan.duplicate_ids == [1]
+    assert plan.unknown_numbers == ["R-000099", "мусор"]
+    assert plan.appends == [] and plan.cell_updates == []
+
+
+def test_plan_handles_blank_and_short_rows():
+    r1, r2 = make_referral(1), make_referral(2, phone="+16502530001")
+    values = [HEADER, [], ["", ""], sheet_row(r2)[:3]]
+    _, plan = plan_reconcile(values, [r1, r2])
+    assert plan.appends == [r1]
+    assert {u.col for u in plan.cell_updates} == set(range(3, len(BOT_HEADERS)))
+    assert all(u.row == 3 for u in plan.cell_updates)
