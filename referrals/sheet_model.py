@@ -90,9 +90,15 @@ def bot_cells(referral: Referral) -> dict[str, str]:
 
 
 def build_row(layout: Layout, referral: Referral) -> list[str]:
+    """Строка для дозаписи. «Фото» и колонки HR берутся из копии в базе: если строку удалили,
+    она восстанавливается целиком, а следующая сверка не затрёт эту копию пустыми ячейками."""
     row = [""] * layout.width
     for header, value in bot_cells(referral).items():
         row[layout.columns[header]] = value
+    row[layout.columns[PHOTO_HEADER]] = referral.photo_url or ""
+    for header, value in referral.hr_data.items():
+        if header in layout.hr_columns:
+            row[layout.hr_columns[header]] = value
     return row
 
 
@@ -105,6 +111,17 @@ def _cell(row: Sequence[str], index: int) -> str:
     return str(row[index]) if index < len(row) else ""
 
 
+def _match_blank_row(row: Sequence[str], layout: Layout, candidates: Sequence[Referral]) -> Referral | None:
+    phone = _cell(row, layout.columns["Телефон"]).strip()
+    email = _cell(row, layout.columns["Почта"]).strip().lower()
+    file_id = _cell(row, layout.columns[FILE_ID_HEADER]).strip()
+    for referral in candidates:
+        if (phone and phone == referral.phone) or (email and email == referral.email) or (
+                file_id and file_id == referral.photo_file_id):
+            return referral
+    return None
+
+
 def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral]) -> tuple[Layout, ReconcilePlan]:
     """Что нужно дописать/исправить в таблице и что забрать из колонок «Фото» и HR."""
     layout = parse_layout(values[0] if values else [])
@@ -115,9 +132,12 @@ def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral
     duplicates: set[int] = set()
     plan = ReconcilePlan()
 
+    blank_rows: list[int] = []
     for index in range(1, len(values)):
         cell = _cell(values[index], id_col).strip()
         if not cell:
+            if any(_cell(values[index], layout.columns[h]).strip() for h in BOT_HEADERS if h != ID_HEADER):
+                blank_rows.append(index)
             continue
         number = parse_number(cell)
         if number is None or number not in known:
@@ -127,6 +147,17 @@ def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral
         else:
             row_of[number] = index
     plan.duplicate_ids = sorted(duplicates)
+
+    # Строка с затёртым «№»: узнаём заявку по телефону, почте или file_id и возвращаем номер,
+    # вместо того чтобы дописывать дубль и осиротить заметки HR.
+    unplaced = [r for r in referrals if r.id not in row_of and r.id not in duplicates]
+    for index in blank_rows:
+        match = _match_blank_row(values[index], layout, unplaced)
+        if match is None:
+            plan.unknown_numbers.append(f"без № (строка {index + 1})")
+            continue
+        row_of[match.id] = index
+        unplaced.remove(match)
 
     for referral in referrals:
         if referral.id in duplicates:

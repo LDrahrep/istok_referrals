@@ -90,3 +90,30 @@ async def test_duplicate_rows_are_left_alone(db):
     report = await sync_sheet(db, sheet, referrals)
     assert report.duplicate_numbers == ["R-000001"]
     assert report.updated_cells == 0
+
+
+async def test_restored_row_keeps_hr_data_and_photo(db):
+    referrals = await create_referrals(db, 1)
+    sheet = FakeSheet([HEADER])
+    await sync_sheet(db, sheet, referrals)
+    sheet.grid[1][HEADER.index(PHOTO_HEADER)] = "https://drive/1"
+    sheet.grid[1][HEADER.index("Статус")] = "Интервью"
+    await sync_sheet(db, sheet, await repo.all_referrals(db))
+    del sheet.grid[1]
+    await sync_sheet(db, sheet, await repo.all_referrals(db))
+    await sync_sheet(db, sheet, await repo.all_referrals(db))
+    [referral] = await repo.all_referrals(db)
+    assert (referral.photo_url, referral.hr_data) == ("https://drive/1", {"Статус": "Интервью"})
+    assert sheet.column("Статус") == ["Интервью"]
+
+
+async def test_cleared_number_is_restored_without_duplicate(db):
+    referrals = await create_referrals(db, 1)
+    sheet = FakeSheet([HEADER])
+    await sync_sheet(db, sheet, referrals)
+    sheet.grid[1][HEADER.index("Статус")] = "Позвонили"
+    sheet.grid[1][0] = ""
+    report = await sync_sheet(db, sheet, await repo.all_referrals(db))
+    assert report.appended == 0
+    assert sheet.column("№") == ["R-000001"]
+    assert sheet.column("Статус") == ["Позвонили"]

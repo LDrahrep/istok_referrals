@@ -124,3 +124,29 @@ def test_plan_handles_blank_and_short_rows():
     assert plan.appends == [r1]
     assert {u.col for u in plan.cell_updates} == set(range(3, len(BOT_HEADERS)))
     assert all(u.row == 3 for u in plan.cell_updates)
+
+
+def test_build_row_restores_photo_and_hr_from_db():
+    layout = parse_layout(HEADER)
+    row = build_row(layout, make_referral(photo_url="https://drive/1", hr_data={"Статус": "Интервью", "Удалена": "x"}))
+    assert row[layout.columns[PHOTO_HEADER]] == "https://drive/1"
+    assert row[layout.hr_columns["Статус"]] == "Интервью"
+    assert row[layout.hr_columns["Заметки"]] == ""
+
+
+def test_plan_restores_blank_number_by_phone():
+    r1 = make_referral(1, hr_data={"Статус": "Позвонили"})
+    row = sheet_row(r1, status="Позвонили")
+    row[0] = ""
+    _, plan = plan_reconcile([HEADER, row], [r1])
+    assert plan.appends == []
+    assert plan.cell_updates == [CellUpdate(1, 0, "R-000001")]
+    assert plan.feedback == {} and plan.unknown_numbers == []
+
+
+def test_plan_reports_blank_number_rows_without_match():
+    r1 = make_referral(1)
+    orphan = sheet_row(make_referral(5, phone="+16502530009", email="x@example.com", photo_file_id="f-5"))
+    orphan[0] = ""
+    _, plan = plan_reconcile([HEADER, sheet_row(r1), orphan], [r1])
+    assert plan.unknown_numbers == ["без № (строка 3)"]
