@@ -94,3 +94,23 @@ def test_referral_caption():
         "Работал у нас: Нет",
         f"Рекомендовал: Ivan Petrov ({EMP_A})",
     ]
+
+
+async def test_non_admin_tap_keeps_card_buttons(db):
+    await waiting_user(db)
+    io = FakeIo()
+    await on_admin_button(db, io, 8, ADMINS, "x:111", CARD)
+    assert io.keyboards_removed == [False]
+    assert io.user_messages == [] and io.admin_edits == []
+
+
+async def test_failed_approval_frees_user_to_ask_again(db):
+    await seed_employees(db, (EMP_A, "Ivan Petrov"), (EMP_B, "B B"))
+    await repo.bind_referrer(db, 999, EMP_A, None, "qr")
+    await repo.deactivate_missing(db, [EMP_A])
+    for emplid in (EMP_A, EMP_B):
+        await waiting_user(db)
+        io = FakeIo()
+        await on_admin_button(db, io, 7, ADMINS, f"v:111:{emplid}", CARD)
+        assert io.user_messages[-1][:2] == (111, t("en", "admin_rejected"))
+        assert "admin_card" not in (await repo.load_session(db, 111)).data

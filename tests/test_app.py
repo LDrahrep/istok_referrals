@@ -65,3 +65,38 @@ def test_build_application_registers_handlers():
     assert len(app.handlers[0]) == 5
     assert app.error_handlers
     assert app.bot_data["cfg"] is CFG
+
+
+class FakeQuery:
+    def __init__(self, answer_error=None):
+        self.answer_error = answer_error
+        self.answers = []
+        self.markups_removed = 0
+
+    async def answer(self, text=None):
+        if self.answer_error:
+            raise self.answer_error
+        self.answers.append(text)
+
+    async def edit_message_reply_markup(self, markup):
+        self.markups_removed += 1
+
+
+def telegram_io(query):
+    from types import SimpleNamespace
+
+    from referrals.app import TelegramIo
+    return TelegramIo(SimpleNamespace(bot=None, application=None), 111, query)
+
+
+async def test_answer_button_survives_expired_query():
+    from telegram.error import BadRequest
+    query = FakeQuery(answer_error=BadRequest("Query is too old and response timeout expired or query id is invalid"))
+    await telegram_io(query).answer_button()
+    assert query.markups_removed == 1
+
+
+async def test_answer_button_can_keep_keyboard():
+    query = FakeQuery()
+    await telegram_io(query).answer_button("Нет прав", remove_keyboard=False)
+    assert query.answers == ["Нет прав"] and query.markups_removed == 0

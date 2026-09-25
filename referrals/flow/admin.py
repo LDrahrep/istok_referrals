@@ -16,7 +16,7 @@ ALREADY_VERIFIED = "Неактуально: сотрудник уже подтв
 async def on_admin_button(db: Db, io: Io, admin_id: int, admin_ids: frozenset[int], data: str,
                           card: tuple[int, int]) -> None:
     if admin_id not in admin_ids:
-        await io.answer_button("Нет прав")
+        await io.answer_button("Нет прав", remove_keyboard=False)  # карточка остаётся рабочей для админов
         return
     await io.answer_button()
     kind, _, rest = data.partition(":")
@@ -33,11 +33,12 @@ async def _approve(db: Db, io: Io, tg_user_id: int, emplid: str, card: tuple[int
         return
     employee = await repo.find_employee(db, emplid)
     if employee is None or not employee.active:
-        await io.edit_admin(card, f"Не подтверждено: {emplid} нет среди активных сотрудников.")
+        await _decline(db, io, tg_user_id, card, f"Не подтверждено: {emplid} нет среди активных сотрудников.")
         return
     result = await repo.bind_referrer(db, tg_user_id, employee.emplid, None, "admin")
     if result is BindResult.EMPLID_TAKEN:
-        await io.edit_admin(card, f"Не подтверждено: {employee.name} уже привязан к другому Telegram-аккаунту.")
+        await _decline(db, io, tg_user_id, card,
+                       f"Не подтверждено: {employee.name} уже привязан к другому Telegram-аккаунту.")
         return
     s = await repo.load_session(db, tg_user_id) or Session(tg_user_id=tg_user_id, step=MENU)
     s.step, s.data, s.submission_key = MENU, {}, None
@@ -51,12 +52,18 @@ async def _reject(db: Db, io: Io, tg_user_id: int, card: tuple[int, int]) -> Non
     if await repo.get_referrer(db, tg_user_id) is not None:
         await io.edit_admin(card, ALREADY_VERIFIED)
         return
+    await _decline(db, io, tg_user_id, card, "❌ Отклонено")
+
+
+async def _decline(db: Db, io: Io, tg_user_id: int, card: tuple[int, int], admin_text: str) -> None:
+    """Запрос закрыт без привязки: сообщаем пользователю и снимаем карточку,
+    чтобы он мог запросить подтверждение снова."""
     s = await repo.load_session(db, tg_user_id)
     if s is not None:
         s.data.pop("admin_card", None)
         await repo.save_session(db, s)
     await io.send_user(tg_user_id, t(s.language if s else None, "admin_rejected"))
-    await io.edit_admin(card, "❌ Отклонено")
+    await io.edit_admin(card, admin_text)
 
 
 async def on_unbind(db: Db, io: Io, admin_id: int, admin_ids: frozenset[int], args: tuple[str, ...]) -> None:

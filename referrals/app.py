@@ -115,10 +115,16 @@ class TelegramIo:
     async def send_user(self, tg_user_id: int, text: str, buttons: Buttons | None = None) -> None:
         await self._bot.send_message(tg_user_id, text, reply_markup=to_markup(buttons))
 
-    async def answer_button(self, text: str | None = None) -> None:
+    async def answer_button(self, text: str | None = None, remove_keyboard: bool = True) -> None:
         if self._query is None:
             return
-        await self._query.answer(text)
+        try:
+            await self._query.answer(text)
+        except BadRequest as exc:
+            # Нажатие, пролежавшее в очереди во время рестарта: ответить уже нельзя, но обработать нужно.
+            log.info("не удалось ответить на нажатие кнопки: %s", exc)
+        if not remove_keyboard:
+            return
         try:
             await self._query.edit_message_reply_markup(None)
         except BadRequest:

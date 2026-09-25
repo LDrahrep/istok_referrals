@@ -61,6 +61,7 @@ class FakeIo:
         self.admin_edits: list[tuple[tuple[int, int], str]] = []
         self.user_messages: list[tuple[int, str, list | None]] = []
         self.answered: list[str | None] = []
+        self.keyboards_removed: list[bool] = []
         self.kicks = 0
         self._next_message_id = 100
 
@@ -83,8 +84,9 @@ class FakeIo:
     async def send_user(self, tg_user_id, text, buttons=None):
         self.user_messages.append((tg_user_id, text, buttons))
 
-    async def answer_button(self, text=None):
+    async def answer_button(self, text=None, remove_keyboard=True):
         self.answered.append(text)
+        self.keyboards_removed.append(remove_keyboard)
 
     def kick_background(self):
         self.kicks += 1
