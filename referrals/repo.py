@@ -2,11 +2,24 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import timedelta
 
+from psycopg import errors
 from psycopg.types.json import Jsonb
 
 from referrals.db import Db
-from referrals.models import BindResult, Employee, Referrer, Session, TabeliEmployee
+from referrals.models import (
+    BindResult,
+    CreateResult,
+    Employee,
+    PhotoBlob,
+    Referral,
+    ReferralDraft,
+    Referrer,
+    Session,
+    TabeliEmployee,
+    referral_number,
+)
 from referrals.validation import name_matches
 
 # ─── сотрудники ────────────────────────────────────────────────
@@ -128,3 +141,142 @@ async def _save_session(conn, session: Session) -> None:
 async def save_session(db: Db, session: Session) -> None:
     async with db.connection() as conn:
         await _save_session(conn, session)
+
+
+# ─── заявки ────────────────────────────────────────────────────
+
+_REFERRAL_SELECT = (
+    "SELECT id, first_name, last_name, phone, email, worked_before, referrer_tg_user_id, "
+    "referrer_emplid, referrer_name, photo_file_id, photo_kind, photo_url, hr_data, created_at "
+    "FROM referrals"
+)
+
+
+class DuplicateCandidate(Exception):
+    """Кандидата с таким телефоном или почтой уже рекомендовали."""
+
+    def __init__(self, existing_id: int) -> None:
+        super().__init__(f"кандидат уже есть: {referral_number(existing_id)}")
+        self.existing_id = existing_id
+
+    @property
+    def number(self) -> str:
+        return referral_number(self.existing_id)
+
+
+async def _referrals(db: Db, where: str = "", params: tuple = ()) -> list[Referral]:
+    async with db.connection() as conn:
+        cur = await conn.execute(f"{_REFERRAL_SELECT} {where}", params)
+        return [Referral(**row) for row in await cur.fetchall()]
+
+
+async def _find_id(db: Db, column: str, value: str) -> int | None:
+    async with db.connection() as conn:
+        cur = await conn.execute(f"SELECT id FROM referrals WHERE {column} = %s", (value,))
+        row = await cur.fetchone()
+    return row["id"] if row else None
+
+
+async def find_referral_by_phone(db: Db, phone: str) -> int | None:
+    return await _find_id(db, "phone", phone)
+
+
+async def find_referral_by_email(db: Db, email: str) -> int | None:
+    return await _find_id(db, "email", email)
+
+
+async def create_referral(db: Db, draft: ReferralDraft, photo: PhotoBlob, next_session: Session) -> CreateResult:
+    """Заявка, фото и новое состояние диалога пишутся одной транзакцией."""
+    try:
+        async with db.connection() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """INSERT INTO referrals (submission_key, first_name, last_name, phone, email,
+                           worked_before, referrer_tg_user_id, referrer_emplid, referrer_name,
+                           photo_file_id, photo_kind)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (submission_key) DO NOTHING
+                       RETURNING id""",
+                    (draft.submission_key, draft.first_name, draft.last_name, draft.phone,
+                     draft.email, draft.worked_before, draft.referrer_tg_user_id,
+                     draft.referrer_emplid, draft.referrer_name, draft.photo_file_id,
+                     draft.photo_kind),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    cur = await conn.execute(
+                        "SELECT id FROM referrals WHERE submission_key = %s", (draft.submission_key,)
+                    )
+                    existing = (await cur.fetchone())["id"]
+                    await _save_session(conn, next_session)
+                    return CreateResult(existing, created=False)
+                await conn.execute(
+                    "INSERT INTO referral_photos (referral_id, content, mime_type, size_bytes, sha256) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (row["id"], photo.content, photo.mime_type, len(photo.content), photo.sha256),
+                )
+                await _save_session(conn, next_session)
+                return CreateResult(row["id"], created=True)
+    except errors.UniqueViolation as exc:
+        existing = await find_referral_by_phone(db, draft.phone) or await find_referral_by_email(db, draft.email)
+        if existing is None:
+            raise
+        raise DuplicateCandidate(existing) from exc
+
+
+async def all_referrals(db: Db) -> list[Referral]:
+    return await _referrals(db, "ORDER BY id")
+
+
+async def referrals_pending_sheet(db: Db, limit: int = 100) -> list[Referral]:
+    return await _referrals(db, "WHERE sheet_synced_at IS NULL ORDER BY id LIMIT %s", (limit,))
+
+
+async def mark_sheet_synced(db: Db, ids: Sequence[int]) -> None:
+    if not ids:
+        return
+    async with db.connection() as conn:
+        await conn.execute(
+            "UPDATE referrals SET sheet_synced_at = now() WHERE id = ANY(%s) AND sheet_synced_at IS NULL",
+            (list(ids),),
+        )
+
+
+async def apply_sheet_feedback(db: Db, feedback: dict[int, tuple[str | None, dict[str, str]]]) -> None:
+    if not feedback:
+        return
+    async with db.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "UPDATE referrals SET photo_url = %s, hr_data = %s WHERE id = %s",
+                [(url, Jsonb(hr), rid) for rid, (url, hr) in feedback.items()],
+            )
+
+
+async def referrals_pending_notify(db: Db, limit: int = 20) -> list[Referral]:
+    return await _referrals(db, "WHERE hr_notified_at IS NULL ORDER BY id LIMIT %s", (limit,))
+
+
+async def mark_notified(db: Db, referral_id: int) -> None:
+    async with db.connection() as conn:
+        await conn.execute("UPDATE referrals SET hr_notified_at = now() WHERE id = %s", (referral_id,))
+
+
+async def stale_photo_referrals(db: Db, older_than: timedelta, limit: int = 20) -> list[Referral]:
+    return await _referrals(
+        db, "WHERE photo_url IS NULL AND created_at < now() - %s ORDER BY id LIMIT %s", (older_than, limit)
+    )
+
+
+async def get_photo(db: Db, referral_id: int) -> PhotoBlob:
+    async with db.connection() as conn:
+        cur = await conn.execute(
+            "SELECT content, mime_type, sha256 FROM referral_photos WHERE referral_id = %s", (referral_id,)
+        )
+        row = await cur.fetchone()
+    return PhotoBlob(content=bytes(row["content"]), mime_type=row["mime_type"], sha256=row["sha256"])
+
+
+async def update_photo_file_id(db: Db, referral_id: int, file_id: str) -> None:
+    async with db.connection() as conn:
+        await conn.execute("UPDATE referrals SET photo_file_id = %s WHERE id = %s", (file_id, referral_id))
