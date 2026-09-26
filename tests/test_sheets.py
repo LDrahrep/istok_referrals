@@ -117,3 +117,18 @@ async def test_cleared_number_is_restored_without_duplicate(db):
     assert report.appended == 0
     assert sheet.column("№") == ["R-000001"]
     assert sheet.column("Статус") == ["Позвонили"]
+
+
+IMAGE_FORMULA = ('=HYPERLINK("https://drive.google.com/file/d/abc123/view", '
+                 'IMAGE("https://drive.google.com/uc?export=view&id=abc123"))')
+
+
+async def test_image_formula_in_photo_column_is_read_back(db):
+    referrals = await create_referrals(db, 1)
+    sheet = FakeSheet([HEADER])
+    await sync_sheet(db, sheet, referrals)
+    sheet.grid[1][HEADER.index(PHOTO_HEADER)] = IMAGE_FORMULA
+    await sync_sheet(db, sheet, await repo.all_referrals(db))
+    [referral] = await repo.all_referrals(db)
+    assert referral.photo_url == "https://drive.google.com/file/d/abc123/view"
+    assert sheet.grid[1][HEADER.index(PHOTO_HEADER)] == IMAGE_FORMULA

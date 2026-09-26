@@ -19,6 +19,7 @@ BOT_HEADERS = (
 )
 REQUIRED_HEADERS = (*BOT_HEADERS, PHOTO_HEADER)
 _NUMBER_RE = re.compile(r"R-(\d{6,})")
+_FORMULA_URL_RE = re.compile(r'"(https?://[^"]+)"')
 
 
 class SheetLayoutError(Exception):
@@ -111,6 +112,15 @@ def _cell(row: Sequence[str], index: int) -> str:
     return str(row[index]) if index < len(row) else ""
 
 
+def photo_url_from_cell(value: str, formula: str = "") -> str | None:
+    """Ссылка на фото из ячейки «Фото». GAS пишет туда формулу HYPERLINK(ссылка, IMAGE(…)), у которой
+    нет текстового значения, поэтому ссылку берём из формулы; обычный текст — как есть."""
+    match = _FORMULA_URL_RE.search(formula or "")
+    if match:
+        return match.group(1)
+    return value.strip() or None
+
+
 def _match_blank_row(row: Sequence[str], layout: Layout, candidates: Sequence[Referral]) -> Referral | None:
     phone = _cell(row, layout.columns["Телефон"]).strip()
     email = _cell(row, layout.columns["Почта"]).strip().lower()
@@ -122,7 +132,8 @@ def _match_blank_row(row: Sequence[str], layout: Layout, candidates: Sequence[Re
     return None
 
 
-def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral]) -> tuple[Layout, ReconcilePlan]:
+def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral],
+                   photo_formulas: Sequence[str] = ()) -> tuple[Layout, ReconcilePlan]:
     """Что нужно дописать/исправить в таблице и что забрать из колонок «Фото» и HR."""
     layout = parse_layout(values[0] if values else [])
     id_col = layout.columns[ID_HEADER]
@@ -171,7 +182,7 @@ def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral
             col = layout.columns[header]
             if _cell(row, col) != value:
                 plan.cell_updates.append(CellUpdate(index, col, value))
-        photo = _cell(row, photo_col).strip() or None
+        photo = photo_url_from_cell(_cell(row, photo_col), _cell(photo_formulas, index))
         hr = {h: _cell(row, c) for h, c in layout.hr_columns.items() if _cell(row, c).strip()}
         if photo != referral.photo_url or hr != referral.hr_data:
             plan.feedback[referral.id] = (photo, hr)

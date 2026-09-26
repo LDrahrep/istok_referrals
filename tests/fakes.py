@@ -10,8 +10,13 @@ class FakeSheet:
         self.row_count = row_count
         self.writes: list[tuple[str, str | None]] = []
 
+    @staticmethod
+    def _display(cell):
+        # Как в настоящем листе: у формулы с картинкой (IMAGE) нет текстового значения.
+        return "" if str(cell).startswith("=") else cell
+
     def get_all_values(self):
-        rows = [list(r) for r in self.grid]
+        rows = [[self._display(c) for c in r] for r in self.grid]
         while rows and not any(str(c).strip() for c in rows[-1]):
             rows.pop()
         width = max((len(r) for r in rows), default=0)
@@ -41,6 +46,17 @@ class FakeSheet:
     def update(self, values=None, range_name=None, value_input_option=None):
         self.writes.append(("update", value_input_option))
         self._write_block(range_name, values)
+
+    def get(self, range_name, value_render_option=None):
+        start, end = range_name.split(":")
+        (r1, c1), (r2, c2) = a1_to_rowcol(start), a1_to_rowcol(end)
+        formulas = str(value_render_option).upper().endswith("FORMULA")
+        result = []
+        for r in range(r1, r2 + 1):
+            line = self.grid[r - 1] if r - 1 < len(self.grid) else []
+            cells = [line[c - 1] if c - 1 < len(line) else "" for c in range(c1, c2 + 1)]
+            result.append(cells if formulas else [self._display(c) for c in cells])
+        return result
 
     def add_rows(self, count: int) -> None:
         self.row_count += count

@@ -150,3 +150,26 @@ def test_plan_reports_blank_number_rows_without_match():
     orphan[0] = ""
     _, plan = plan_reconcile([HEADER, sheet_row(r1), orphan], [r1])
     assert plan.unknown_numbers == ["без № (строка 3)"]
+
+
+IMAGE_FORMULA = ('=HYPERLINK("https://drive.google.com/file/d/abc123/view", '
+                 'IMAGE("https://drive.google.com/uc?export=view&id=abc123"))')
+
+
+def test_photo_url_is_read_from_image_formula():
+    r1 = make_referral(1)
+    # у ячейки с картинкой нет текстового значения — ссылку берём из формулы
+    _, plan = plan_reconcile([HEADER, sheet_row(r1, photo="")], [r1], photo_formulas=["", IMAGE_FORMULA])
+    assert plan.feedback == {1: ("https://drive.google.com/file/d/abc123/view", {})}
+
+
+def test_photo_formula_matching_db_gives_no_feedback():
+    r1 = make_referral(1, photo_url="https://drive.google.com/file/d/abc123/view")
+    _, plan = plan_reconcile([HEADER, sheet_row(r1, photo="")], [r1], photo_formulas=["", IMAGE_FORMULA])
+    assert plan.feedback == {}
+
+
+def test_plain_photo_link_still_read_without_formulas():
+    r1 = make_referral(1)
+    _, plan = plan_reconcile([HEADER, sheet_row(r1, photo="https://drive/x")], [r1], photo_formulas=["", ""])
+    assert plan.feedback == {1: ("https://drive/x", {})}
