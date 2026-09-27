@@ -9,18 +9,23 @@ const SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'gas', 'photos.g
 const HEADER = ['№', 'Имя', 'Фамилия', 'file_id', 'Фото'];
 const PHOTO = 4;
 
-const imageFormula = (id) =>
-  `=HYPERLINK("https://drive.google.com/file/d/${id}/view", ` +
+const imageFormula = (id, sep = ',') =>
+  `=HYPERLINK("https://drive.google.com/file/d/${id}/view"${sep} ` +
   `IMAGE("https://drive.google.com/uc?export=view&id=${id}"))`;
 
-function makeEnv(rows, { onDownload } = {}) {
+function makeEnv(rows, { onDownload, locale = 'en_US' } = {}) {
   const grid = [HEADER.slice(), ...rows.map((r) => r.slice())];
+  // Как Google Sheets: разделитель аргументов формулы зависит от локали таблицы
+  // (в ru_RU — «;», в en_US — «,»); формула с чужим разделителем показывает #ERROR!.
+  const wrongSep = locale === 'ru_RU' ? '", IMAGE(' : '"; IMAGE(';
+  let flushes = 0;
   const notes = {};
   const heights = {};
   const sharing = {};
   const files = [];
   const isFormula = (v) => String(v).startsWith('=');
-  const display = (v) => (isFormula(v) ? '' : v);  // у формулы с IMAGE нет текстового значения
+  // у формулы с IMAGE нет текстового значения; формула с чужим разделителем — #ERROR!
+  const display = (v) => (isFormula(v) ? (String(v).includes(wrongSep) ? '#ERROR!' : '') : v);
   const driveFile = (f) => ({
     getId: () => f.id,
     getUrl: () => `https://drive.google.com/file/d/${f.id}/view`,
@@ -28,6 +33,7 @@ function makeEnv(rows, { onDownload } = {}) {
   });
   const range = (r, c, nr = 1, nc = 1) => ({
     getValue: () => display(grid[r - 1][c - 1]),
+    getDisplayValue: () => String(display(grid[r - 1][c - 1])),
     setValue: (v) => { grid[r - 1][c - 1] = v; },
     setFormula: (f) => { grid[r - 1][c - 1] = f; },
     setNote: (n) => { notes[`${r}:${c}`] = n; },
@@ -63,7 +69,7 @@ function makeEnv(rows, { onDownload } = {}) {
       Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
       Permission: { VIEW: 'VIEW' },
     },
-    SpreadsheetApp: { getActive: () => ({ getSheetByName: () => sheet }) },
+    SpreadsheetApp: { getActive: () => ({ getSheetByName: () => sheet }), flush: () => { flushes++; } },
     UrlFetchApp: {
       fetch: (url) => {
         const getFile = url.match(/getFile\?file_id=(.*)$/);
@@ -135,5 +141,21 @@ test('ячейка с картинкой и чужой текст не трог�
   env.context.uploadPhotos();
   assert.strictEqual(env.grid[1][PHOTO], imageFormula('done'));
   assert.strictEqual(env.grid[2][PHOTO], 'фото у HR на почте');
+  assert.strictEqual(env.files.length, 0);
+});
+
+
+test('в русской локали картинка пишется через «;» и не показывает #ERROR!', () => {
+  const env = makeEnv([['R-000010', 'Aziz', 'Karimov', 'file-10', '']], { locale: 'ru_RU' });
+  env.context.uploadPhotos();
+  assert.strictEqual(env.grid[1][PHOTO], imageFormula('drive-file-10', ';'));
+});
+
+test('сломанная формула (#ERROR! из-за разделителя) чинится без повторной загрузки', () => {
+  const broken = imageFormula('abc123', ',');
+  const env = makeEnv([['R-000010', 'Aziz', 'Karimov', 'file-10', broken]], { locale: 'ru_RU' });
+  env.context.uploadPhotos();
+  assert.strictEqual(env.grid[1][PHOTO], imageFormula('abc123', ';'));
+  assert.strictEqual(env.sharing.abc123, 'ANYONE_WITH_LINK/VIEW');
   assert.strictEqual(env.files.length, 0);
 });

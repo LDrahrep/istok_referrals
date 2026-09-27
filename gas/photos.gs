@@ -42,12 +42,18 @@ function uploadPhotos() {
     for (var r = 1; r < values.length && processed < MAX_ROWS_PER_RUN; r++) {
       var row = values[r];
       var number = String(row[col.id]).trim();
-      if (!number || formulas[r][col.photo]) continue;  // картинка уже стоит
+      if (!number) continue;
+      var photoFormula = formulas[r][col.photo];
       var photoText = String(row[col.photo]).trim();
       var fileId = String(row[col.fileId]).trim();
 
       var driveId = null, error = null;
-      if (photoText) {
+      if (photoFormula) {
+        // Картинка уже стоит. Чиним только нашу формулу, которая не разобралась (#ERROR!).
+        var broken = photoText === '#ERROR!' && photoFormula.match(DRIVE_FILE_ID_RE);
+        if (!broken) continue;
+        driveId = broken[1];
+      } else if (photoText) {
         var match = photoText.match(DRIVE_FILE_ID_RE);
         if (!match) continue;  // в ячейке что-то своё от HR — не трогаем
         driveId = match[1];
@@ -73,7 +79,12 @@ function uploadPhotos() {
         cell.setNote('Ошибка загрузки ' + new Date().toISOString() + ': ' + error);
         continue;
       }
-      cell.setFormula(imageFormula_(driveId));
+      try {
+        writeImage_(cell, driveId);
+      } catch (e) {
+        cell.setNote('Ошибка записи картинки ' + new Date().toISOString() + ': ' + e.message);
+        continue;
+      }
       cell.setNote('');
       sheet.setRowHeight(target, PHOTO_ROW_HEIGHT);
     }
@@ -82,9 +93,26 @@ function uploadPhotos() {
   }
 }
 
-function imageFormula_(driveId) {
-  return '=HYPERLINK("https://drive.google.com/file/d/' + driveId + '/view", ' +
+function imageFormula_(driveId, sep) {
+  return '=HYPERLINK("https://drive.google.com/file/d/' + driveId + '/view"' + sep + ' ' +
          'IMAGE("https://drive.google.com/uc?export=view&id=' + driveId + '"))';
+}
+
+// Разделитель аргументов в формулах зависит от локали таблицы: «,» (en_US) или «;» (ru_RU и др.).
+// Пробуем оба и запоминаем тот, что разобрался без #ERROR!.
+var formulaSep_ = null;
+
+function writeImage_(cell, driveId) {
+  var candidates = formulaSep_ ? [formulaSep_] : [',', ';'];
+  for (var i = 0; i < candidates.length; i++) {
+    cell.setFormula(imageFormula_(driveId, candidates[i]));
+    SpreadsheetApp.flush();
+    if (cell.getDisplayValue() !== '#ERROR!') {
+      formulaSep_ = candidates[i];
+      return;
+    }
+  }
+  throw new Error('таблица не принимает формулу картинки');
 }
 
 function shareByLink_(file) {
