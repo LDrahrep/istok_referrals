@@ -40,7 +40,7 @@ def open_worksheet(credentials: dict, spreadsheet_id: str, sheet_name: str) -> g
 
 
 def _ensure_auto_headers(ws, values) -> bool:
-    """Дописывает недостающие заголовки новых колонок бота справа от последнего заголовка."""
+    """Дописывает недостающие заголовки новых колонок бота правее всех занятых столбцов."""
     if not values:
         return False
     header = [str(h).strip() for h in values[0]]
@@ -49,9 +49,9 @@ def _ensure_auto_headers(ws, values) -> bool:
         return False
     if any(h not in header for h in REQUIRED_HEADERS if h not in AUTO_HEADERS):
         return False  # раскладка сломана иначе — ничего не пишем, parse_layout сообщит об ошибке
+    # get_all_values выравнивает строки по самой широкой, поэтому len(header) — это самый правый столбец,
+    # где хоть в одной строке есть данные. Пишем правее него, чтобы не занять столбец HR без заголовка.
     width = len(header)
-    while width and not header[width - 1]:
-        width -= 1
     needed = width + len(missing)
     if needed > ws.col_count:
         ws.add_cols(needed - ws.col_count)

@@ -163,3 +163,15 @@ async def test_live_hr_status_reads_the_sheet(db):
     sheet.grid[1][HEADER.index("Статус")] = "Интервью"
     assert await LiveHrStatus(lambda: sheet).hr_status("R-000001") == "Интервью"
     assert await LiveHrStatus(lambda: sheet).hr_status("R-000404") is None
+
+
+async def test_withdrawn_header_does_not_take_over_unlabeled_hr_column(db):
+    referrals = await create_referrals(db, 1)
+    old_header = [h for h in HEADER if h != WITHDRAWN_HEADER]
+    # живая таблица: строка заявки, а справа от «Статус» — заметка HR в столбце без заголовка
+    row = ["R-000001"] + [""] * (len(old_header) - 1) + ["позвонить в пн"]
+    sheet = FakeSheet([old_header, row], col_count=len(old_header) + 1)
+    await sync_sheet(db, sheet, referrals)
+    header = sheet.get_all_values()[0]
+    assert header.index(WITHDRAWN_HEADER) == len(old_header) + 1
+    assert sheet.grid[1][len(old_header)] == "позвонить в пн"
