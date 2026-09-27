@@ -100,3 +100,20 @@ async def test_answer_button_can_keep_keyboard():
     query = FakeQuery()
     await telegram_io(query).answer_button("Нет прав", remove_keyboard=False)
     assert query.answers == ["Нет прав"] and query.markups_removed == 0
+
+
+async def test_sheet_reader_reads_status_from_configured_sheet(monkeypatch):
+    from referrals import app as app_module
+    from referrals.sheet_model import BOT_HEADERS, PHOTO_HEADER
+    from tests.fakes import FakeSheet
+    opened = []
+    row = ["R-000001"] + [""] * (len(BOT_HEADERS) - 1) + ["", "Интервью"]
+    sheet = FakeSheet([[*BOT_HEADERS, PHOTO_HEADER, "Статус"], row])
+
+    def fake_open(credentials, spreadsheet_id, sheet_name):
+        opened.append((spreadsheet_id, sheet_name))
+        return sheet
+
+    monkeypatch.setattr(app_module, "open_worksheet", fake_open)
+    assert await app_module.sheet_reader(CFG).hr_status("R-000001") == "Интервью"
+    assert opened == [("s", "Заявки")]

@@ -29,7 +29,7 @@ from referrals.flow.events import Button, Command, Document, Event, Other, Photo
 from referrals.flow.io import Buttons
 from referrals.flow.router import handle_event
 from referrals.models import PhotoBlob, Referral
-from referrals.sheets import open_worksheet
+from referrals.sheets import LiveHrStatus, open_worksheet
 
 log = logging.getLogger("referrals")
 
@@ -160,9 +160,14 @@ class TelegramNotifier:
 
 # ─── обработчики ───────────────────────────────────────────────
 
+def sheet_reader(cfg: Config) -> LiveHrStatus:
+    return LiveHrStatus(lambda: open_worksheet(cfg.google_credentials, cfg.spreadsheet_id, cfg.sheet_name))
+
+
 async def on_private(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     io = TelegramIo(context, update.effective_chat.id, update.callback_query)
-    await handle_event(_deps(context).db, io, to_user(update), to_event(update))
+    deps = _deps(context)
+    await handle_event(deps.db, io, to_user(update), to_event(update), sheet=sheet_reader(deps.cfg))
 
 
 async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
