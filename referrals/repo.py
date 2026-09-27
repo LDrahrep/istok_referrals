@@ -18,6 +18,7 @@ from referrals.models import (
     Referrer,
     Session,
     TabeliEmployee,
+    WithdrawResult,
     referral_number,
 )
 from referrals.validation import name_matches
@@ -147,7 +148,7 @@ async def save_session(db: Db, session: Session) -> None:
 
 _REFERRAL_SELECT = (
     "SELECT id, first_name, last_name, phone, email, worked_before, referrer_tg_user_id, "
-    "referrer_emplid, referrer_name, photo_file_id, photo_kind, photo_url, hr_data, created_at "
+    "referrer_emplid, referrer_name, photo_file_id, photo_kind, photo_url, hr_data, created_at, withdrawn_at "
     "FROM referrals"
 )
 
@@ -172,7 +173,7 @@ async def _referrals(db: Db, where: str = "", params: tuple = ()) -> list[Referr
 
 async def _find_id(db: Db, column: str, value: str) -> int | None:
     async with db.connection() as conn:
-        cur = await conn.execute(f"SELECT id FROM referrals WHERE {column} = %s", (value,))
+        cur = await conn.execute(f"SELECT id FROM referrals WHERE {column} = %s AND withdrawn_at IS NULL", (value,))
         row = await cur.fetchone()
     return row["id"] if row else None
 
@@ -264,7 +265,7 @@ async def mark_notified(db: Db, referral_id: int) -> None:
 
 async def stale_photo_referrals(db: Db, older_than: timedelta, limit: int = 20) -> list[Referral]:
     return await _referrals(
-        db, "WHERE photo_url IS NULL AND created_at < now() - %s ORDER BY id LIMIT %s", (older_than, limit)
+        db, "WHERE photo_url IS NULL AND withdrawn_at IS NULL AND created_at < now() - %s ORDER BY id LIMIT %s", (older_than, limit)
     )
 
 
@@ -280,3 +281,28 @@ async def get_photo(db: Db, referral_id: int) -> PhotoBlob:
 async def update_photo_file_id(db: Db, referral_id: int, file_id: str) -> None:
     async with db.connection() as conn:
         await conn.execute("UPDATE referrals SET photo_file_id = %s WHERE id = %s", (file_id, referral_id))
+
+
+async def list_referrals_by_referrer(db: Db, emplid: str, limit: int = 20) -> list[Referral]:
+    return await _referrals(db, "WHERE referrer_emplid = %s ORDER BY id DESC LIMIT %s", (emplid, limit))
+
+
+async def get_referral(db: Db, referral_id: int) -> Referral | None:
+    found = await _referrals(db, "WHERE id = %s", (referral_id,))
+    return found[0] if found else None
+
+
+async def withdraw_referral(db: Db, referral_id: int, emplid: str) -> WithdrawResult:
+    """Отзыв своей заявки: отметка времени и повторная выгрузка строки в таблицу."""
+    async with db.connection() as conn:
+        cur = await conn.execute(
+            "UPDATE referrals SET withdrawn_at = now(), sheet_synced_at = NULL "
+            "WHERE id = %s AND referrer_emplid = %s AND withdrawn_at IS NULL RETURNING id",
+            (referral_id, emplid),
+        )
+        if await cur.fetchone():
+            return WithdrawResult.WITHDRAWN
+        cur = await conn.execute(
+            "SELECT 1 FROM referrals WHERE id = %s AND referrer_emplid = %s", (referral_id, emplid)
+        )
+        return WithdrawResult.ALREADY if await cur.fetchone() else WithdrawResult.NOT_FOUND

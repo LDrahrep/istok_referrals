@@ -41,6 +41,12 @@ class BindResult(enum.Enum):
     EMPLID_TAKEN = "emplid_taken"
 
 
+class WithdrawResult(enum.Enum):
+    WITHDRAWN = "withdrawn"
+    ALREADY = "already"
+    NOT_FOUND = "not_found"
+
+
 @dataclass
 class Session:
     tg_user_id: int
@@ -95,6 +101,7 @@ class Referral:
     photo_url: str | None
     hr_data: dict
     created_at: datetime
+    withdrawn_at: datetime | None = None
 
     @property
     def number(self) -> str:
