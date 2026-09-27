@@ -11,7 +11,18 @@ from gspread.utils import ValueRenderOption, rowcol_to_a1
 from referrals import repo
 from referrals.db import Db
 from referrals.models import Referral, referral_number
-from referrals.sheet_model import PHOTO_HEADER, Layout, build_row, parse_layout, plan_reconcile
+from referrals.sheet_model import (
+    PHOTO_HEADER,
+    REQUIRED_HEADERS,
+    WITHDRAWN_HEADER,
+    Layout,
+    build_row,
+    hr_status_from_values,
+    parse_layout,
+    plan_reconcile,
+)
+
+AUTO_HEADERS = (WITHDRAWN_HEADER,)
 
 
 @dataclass
@@ -28,6 +39,38 @@ def open_worksheet(credentials: dict, spreadsheet_id: str, sheet_name: str) -> g
     return client.open_by_key(spreadsheet_id).worksheet(sheet_name)
 
 
+def _ensure_auto_headers(ws, values) -> bool:
+    """Дописывает недостающие заголовки новых колонок бота справа от последнего заголовка."""
+    if not values:
+        return False
+    header = [str(h).strip() for h in values[0]]
+    missing = [h for h in AUTO_HEADERS if h not in header]
+    if not missing:
+        return False
+    if any(h not in header for h in REQUIRED_HEADERS if h not in AUTO_HEADERS):
+        return False  # раскладка сломана иначе — ничего не пишем, parse_layout сообщит об ошибке
+    width = len(header)
+    while width and not header[width - 1]:
+        width -= 1
+    needed = width + len(missing)
+    if needed > ws.col_count:
+        ws.add_cols(needed - ws.col_count)
+    ws.update(values=[missing], range_name=rowcol_to_a1(1, width + 1), value_input_option="RAW")
+    return True
+
+
+class LiveHrStatus:
+    """Живое чтение колонки «Статус» для проверки перед отзывом заявки."""
+
+    def __init__(self, open_ws) -> None:
+        self._open_ws = open_ws
+
+    async def hr_status(self, number: str) -> str | None:
+        ws = await asyncio.to_thread(self._open_ws)
+        values = await asyncio.to_thread(ws.get_all_values)
+        return hr_status_from_values(values, number)
+
+
 def _photo_formulas(ws, layout: Layout, row_count: int) -> list[str]:
     """Формулы колонки «Фото»: GAS пишет туда HYPERLINK(…, IMAGE(…)), у которой нет текстового значения."""
     if row_count <= 1:
@@ -41,6 +84,8 @@ def _photo_formulas(ws, layout: Layout, row_count: int) -> list[str]:
 async def sync_sheet(db: Db, ws, referrals: Sequence[Referral]) -> SheetSyncReport:
     """Приводит колонки бота к базе, дописывает недостающие строки, забирает «Фото» и колонки HR."""
     values = await asyncio.to_thread(ws.get_all_values)
+    if await asyncio.to_thread(_ensure_auto_headers, ws, values):
+        values = await asyncio.to_thread(ws.get_all_values)
     layout = parse_layout(values[0] if values else [])
     photo_formulas = await asyncio.to_thread(_photo_formulas, ws, layout, len(values))
     layout, plan = plan_reconcile(values, referrals, photo_formulas)

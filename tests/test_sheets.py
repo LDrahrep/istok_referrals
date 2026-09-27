@@ -2,9 +2,9 @@ import pytest
 
 from referrals import repo
 from referrals.models import Session
-from referrals.sheet_model import BOT_HEADERS, PHOTO_HEADER, SheetLayoutError
-from referrals.sheets import sync_sheet
-from tests.factories import make_draft, make_photo
+from referrals.sheet_model import BOT_HEADERS, PHOTO_HEADER, WITHDRAWN_HEADER, SheetLayoutError
+from referrals.sheets import LiveHrStatus, sync_sheet
+from tests.factories import EMP_A, make_draft, make_photo
 from tests.fakes import FakeSheet
 from tests.helpers import seed_referrer
 
@@ -132,3 +132,34 @@ async def test_image_formula_in_photo_column_is_read_back(db):
     [referral] = await repo.all_referrals(db)
     assert referral.photo_url == "https://drive.google.com/file/d/abc123/view"
     assert sheet.grid[1][HEADER.index(PHOTO_HEADER)] == IMAGE_FORMULA
+
+
+async def test_missing_withdrawn_header_is_added(db):
+    referrals = await create_referrals(db, 1)
+    old_header = [h for h in HEADER if h != WITHDRAWN_HEADER]
+    sheet = FakeSheet([old_header], col_count=len(old_header))
+    await sync_sheet(db, sheet, referrals)
+    header = sheet.get_all_values()[0]
+    assert header[len(old_header)] == WITHDRAWN_HEADER
+    assert sheet.col_count >= len(old_header) + 1
+    assert sheet.column("№") == ["R-000001"]
+
+
+async def test_withdrawn_referral_is_marked_in_sheet(db):
+    referrals = await create_referrals(db, 1)
+    sheet = FakeSheet([HEADER])
+    await sync_sheet(db, sheet, referrals)
+    await repo.withdraw_referral(db, referrals[0].id, EMP_A)
+    await sync_sheet(db, sheet, await repo.referrals_pending_sheet(db))
+    [mark] = sheet.column(WITHDRAWN_HEADER)
+    assert mark.startswith("20")
+    assert await repo.referrals_pending_sheet(db) == []
+
+
+async def test_live_hr_status_reads_the_sheet(db):
+    referrals = await create_referrals(db, 1)
+    sheet = FakeSheet([HEADER])
+    await sync_sheet(db, sheet, referrals)
+    sheet.grid[1][HEADER.index("Статус")] = "Интервью"
+    assert await LiveHrStatus(lambda: sheet).hr_status("R-000001") == "Интервью"
+    assert await LiveHrStatus(lambda: sheet).hr_status("R-000404") is None

@@ -13,9 +13,11 @@ from referrals.models import Referral, referral_number
 ID_HEADER = "№"
 FILE_ID_HEADER = "file_id"
 PHOTO_HEADER = "Фото"
+WITHDRAWN_HEADER = "Отозвана"
+HR_STATUS_HEADER = "Статус"
 BOT_HEADERS = (
     ID_HEADER, "Дата", "Имя", "Фамилия", "Телефон", "Почта",
-    "Работал у нас", "Рекомендатель", "Emplid рекомендателя", FILE_ID_HEADER,
+    "Работал у нас", "Рекомендатель", "Emplid рекомендателя", FILE_ID_HEADER, WITHDRAWN_HEADER,
 )
 REQUIRED_HEADERS = (*BOT_HEADERS, PHOTO_HEADER)
 _NUMBER_RE = re.compile(r"R-(\d{6,})")
@@ -87,6 +89,7 @@ def bot_cells(referral: Referral) -> dict[str, str]:
         "Рекомендатель": referral.referrer_name,
         "Emplid рекомендателя": referral.referrer_emplid,
         FILE_ID_HEADER: referral.photo_file_id,
+        WITHDRAWN_HEADER: format_created(referral.withdrawn_at) if referral.withdrawn_at else "",
     }
 
 
@@ -119,6 +122,18 @@ def photo_url_from_cell(value: str, formula: str = "") -> str | None:
     if match:
         return match.group(1)
     return value.strip() or None
+
+
+def hr_status_from_values(values: Sequence[Sequence[str]], number: str) -> str | None:
+    """«Статус» HR у строки заявки прямо из листа. None — нет колонки, номера или строки."""
+    header = [str(h).strip() for h in values[0]] if values else []
+    if ID_HEADER not in header or HR_STATUS_HEADER not in header:
+        return None
+    id_col, status_col = header.index(ID_HEADER), header.index(HR_STATUS_HEADER)
+    for row in values[1:]:
+        if _cell(row, id_col).strip() == number:
+            return _cell(row, status_col).strip()
+    return None
 
 
 def _match_blank_row(row: Sequence[str], layout: Layout, candidates: Sequence[Referral]) -> Referral | None:

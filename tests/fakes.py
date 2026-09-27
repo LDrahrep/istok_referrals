@@ -5,9 +5,10 @@ from gspread.utils import a1_to_rowcol
 class FakeSheet:
     """Имитация gspread.Worksheet: сетка строк, лимит строк как у настоящего листа."""
 
-    def __init__(self, rows, row_count: int = 1000):
+    def __init__(self, rows, row_count: int = 1000, col_count: int = 26):
         self.grid = [list(r) for r in rows]
         self.row_count = row_count
+        self.col_count = col_count
         self.writes: list[tuple[str, str | None]] = []
 
     @staticmethod
@@ -25,6 +26,8 @@ class FakeSheet:
     def _write(self, row: int, col: int, value: str) -> None:
         if row > self.row_count:
             raise ValueError(f"row {row} exceeds grid limits ({self.row_count})")
+        if col > self.col_count:
+            raise ValueError(f"column {col} exceeds grid limits ({self.col_count})")
         while len(self.grid) < row:
             self.grid.append([])
         line = self.grid[row - 1]
@@ -60,6 +63,9 @@ class FakeSheet:
 
     def add_rows(self, count: int) -> None:
         self.row_count += count
+
+    def add_cols(self, count: int) -> None:
+        self.col_count += count
 
     def column(self, header: str) -> list[str]:
         values = self.get_all_values()

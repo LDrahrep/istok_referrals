@@ -5,11 +5,13 @@ import pytest
 from referrals.sheet_model import (
     BOT_HEADERS,
     PHOTO_HEADER,
+    WITHDRAWN_HEADER,
     CellUpdate,
     SheetLayoutError,
     bot_cells,
     build_row,
     format_created,
+    hr_status_from_values,
     parse_layout,
     parse_number,
     plan_reconcile,
@@ -27,14 +29,14 @@ def sheet_row(referral, photo="", status="", notes=""):
 def test_parse_layout_standard():
     layout = parse_layout(HEADER)
     assert layout.columns["№"] == 0
-    assert layout.columns[PHOTO_HEADER] == 10
-    assert layout.hr_columns == {"Статус": 11, "Заметки": 12}
-    assert layout.width == 13
+    assert layout.columns[PHOTO_HEADER] == 11
+    assert layout.hr_columns == {"Статус": 12, "Заметки": 13}
+    assert layout.width == 14
 
 
 def test_parse_layout_any_order_and_spaces():
     layout = parse_layout(["Заметки", f" {PHOTO_HEADER} ", *reversed(BOT_HEADERS)])
-    assert layout.columns["№"] == 11
+    assert layout.columns["№"] == 12
     assert layout.columns[PHOTO_HEADER] == 1
     assert layout.hr_columns == {"Заметки": 0}
 
@@ -122,7 +124,7 @@ def test_plan_handles_blank_and_short_rows():
     values = [HEADER, [], ["", ""], sheet_row(r2)[:3]]
     _, plan = plan_reconcile(values, [r1, r2])
     assert plan.appends == [r1]
-    assert {u.col for u in plan.cell_updates} == set(range(3, len(BOT_HEADERS)))
+    assert {u.col for u in plan.cell_updates} == set(range(3, BOT_HEADERS.index(WITHDRAWN_HEADER)))
     assert all(u.row == 3 for u in plan.cell_updates)
 
 
@@ -173,3 +175,18 @@ def test_plain_photo_link_still_read_without_formulas():
     r1 = make_referral(1)
     _, plan = plan_reconcile([HEADER, sheet_row(r1, photo="https://drive/x")], [r1], photo_formulas=["", ""])
     assert plan.feedback == {1: ("https://drive/x", {})}
+
+
+def test_bot_cells_marks_withdrawal():
+    assert bot_cells(make_referral())[WITHDRAWN_HEADER] == ""
+    withdrawn = make_referral(withdrawn_at=datetime(2026, 9, 26, 15, 30, tzinfo=timezone.utc))
+    assert bot_cells(withdrawn)[WITHDRAWN_HEADER] == "2026-09-26 10:30"
+
+
+def test_hr_status_from_values():
+    values = [HEADER, sheet_row(make_referral(1), status="Интервью"), sheet_row(make_referral(2, phone="+16502530001"))]
+    assert hr_status_from_values(values, "R-000001") == "Интервью"
+    assert hr_status_from_values(values, "R-000002") == ""
+    assert hr_status_from_values(values, "R-000009") is None
+    assert hr_status_from_values([[h for h in HEADER if h != "Статус"]], "R-000001") is None
+    assert hr_status_from_values([], "R-000001") is None
