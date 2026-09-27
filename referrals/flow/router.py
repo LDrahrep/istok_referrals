@@ -5,11 +5,14 @@ from referrals import repo
 from referrals.db import Db
 from referrals.flow import auth, mine, referral
 from referrals.flow.common import prompt_language, show_menu
-from referrals.flow.events import Button, Command, Event, User
+from referrals.flow.events import Button, Command, Event, Text, User
 from referrals.flow.io import Io, SheetReader
 from referrals.flow.steps import AUTH_ADMIN_NAME, AUTH_STEPS, AUTH_WAIT_ID, FORM_STEPS, LANG, MENU
 from referrals.i18n import t
 from referrals.models import Referrer, Session
+
+# Надписи постоянной кнопки «Отмена» на всех языках: старая клавиатура после смены языка тоже работает.
+CANCEL_LABELS = frozenset({t("ru", "btn_cancel"), t("en", "btn_cancel")})
 
 
 async def handle_event(db: Db, io: Io, user: User, event: Event, sheet: SheetReader | None = None) -> None:
@@ -25,6 +28,9 @@ async def handle_event(db: Db, io: Io, user: User, event: Event, sheet: SheetRea
             await _on_cancel(db, io, s, ref)
         else:
             await _on_start(db, io, s, ref)
+        return
+    if isinstance(event, Text) and event.text.strip() in CANCEL_LABELS:
+        await _on_cancel(db, io, s, ref)
         return
     if isinstance(event, Button) and event.data.startswith("lang:"):
         await auth.on_language(db, io, s, ref, event.data.removeprefix("lang:"))
@@ -69,6 +75,7 @@ async def _on_start(db: Db, io: Io, s: Session, ref: Referrer | None) -> None:
         return
     s.step, s.data, s.submission_key = MENU, {}, None
     await repo.save_session(db, s)
+    await io.reply(t(s.language, "keyboard_hint"), keyboard=[t(s.language, "btn_cancel")])
     await show_menu(io, s.language)
 
 
@@ -81,7 +88,10 @@ async def _on_cancel(db: Db, io: Io, s: Session, ref: Referrer | None) -> None:
         await repo.save_session(db, s)
         await auth.prompt_auth(io, s)
         return
-    await referral.cancel_form(db, io, s)
+    if s.step in FORM_STEPS:
+        await referral.cancel_form(db, io, s)
+    else:
+        await show_menu(io, s.language)
 
 
 async def _on_menu(db: Db, io: Io, s: Session, ref: Referrer, event: Event, sheet: SheetReader | None) -> None:

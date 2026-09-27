@@ -53,4 +53,5 @@ TEXTS = {
     "withdraw_blocked": "Эту заявку отозвать нельзя, напишите HR.",
     "withdrawn_done": "Заявка {number} отозвана.",
     "already_withdrawn": "Заявка {number} уже отозвана.",
+    "keyboard_hint": "Кнопка «✖️ Отмена» внизу экрана отменяет анкету в любой момент.",
 }

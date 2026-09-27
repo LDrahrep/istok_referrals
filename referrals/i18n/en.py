@@ -53,4 +53,5 @@ TEXTS = {
     "withdraw_blocked": "This application can't be withdrawn. Please contact HR.",
     "withdrawn_done": "Application {number} has been withdrawn.",
     "already_withdrawn": "Application {number} is already withdrawn.",
+    "keyboard_hint": "The “✖️ Cancel” button at the bottom cancels the form at any time.",
 }

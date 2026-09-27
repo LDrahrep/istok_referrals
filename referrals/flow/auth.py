@@ -31,6 +31,7 @@ async def on_language(db: Db, io: Io, s: Session, ref: Referrer | None, lang: st
     if ref is not None:
         s.step, s.data, s.submission_key = MENU, {}, None
         await repo.save_session(db, s)
+        await io.reply(t(lang, "keyboard_hint"), keyboard=[t(lang, "btn_cancel")])
         await show_menu(io, lang)
         return
     s.step = AUTH_WAIT_ID
@@ -68,7 +69,7 @@ async def _verify(db: Db, io: Io, user: User, s: Session, emplid: str, method: s
         await io.edit_admin((card[0], card[1]), admin_texts.CARD_OBSOLETE)
     s.step, s.data, s.submission_key = MENU, {}, None
     await repo.save_session(db, s)
-    await io.reply(t(s.language, "welcome", name=name))
+    await io.reply(t(s.language, "welcome", name=name), keyboard=[t(s.language, "btn_cancel")])
     await show_menu(io, s.language)
 
 

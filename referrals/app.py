@@ -7,7 +7,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import httpx
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -72,6 +79,14 @@ def to_markup(buttons: Buttons | None) -> InlineKeyboardMarkup | None:
     )
 
 
+def _markup(buttons: Buttons | None, keyboard: list[str] | None):
+    """Постоянная клавиатура внизу экрана, если задана, иначе inline-кнопки под сообщением."""
+    if keyboard:
+        return ReplyKeyboardMarkup([[KeyboardButton(label) for label in keyboard]],
+                                   resize_keyboard=True, is_persistent=True)
+    return to_markup(buttons)
+
+
 # ─── зависимости и реализации Io/Notifier ──────────────────────
 
 @dataclass
@@ -94,8 +109,8 @@ class TelegramIo:
         self._chat_id = chat_id
         self._query = query
 
-    async def reply(self, text: str, buttons: Buttons | None = None) -> None:
-        await self._bot.send_message(self._chat_id, text, reply_markup=to_markup(buttons))
+    async def reply(self, text: str, buttons: Buttons | None = None, keyboard: list[str] | None = None) -> None:
+        await self._bot.send_message(self._chat_id, text, reply_markup=_markup(buttons, keyboard))
 
     async def download(self, file_id: str) -> bytes:
         file = await self._bot.get_file(file_id)
@@ -112,8 +127,9 @@ class TelegramIo:
         except BadRequest as exc:
             log.warning("не удалось изменить сообщение %s: %s", ref, exc)
 
-    async def send_user(self, tg_user_id: int, text: str, buttons: Buttons | None = None) -> None:
-        await self._bot.send_message(tg_user_id, text, reply_markup=to_markup(buttons))
+    async def send_user(self, tg_user_id: int, text: str, buttons: Buttons | None = None,
+                        keyboard: list[str] | None = None) -> None:
+        await self._bot.send_message(tg_user_id, text, reply_markup=_markup(buttons, keyboard))
 
     async def answer_button(self, text: str | None = None, remove_keyboard: bool = True) -> None:
         if self._query is None:
@@ -271,7 +287,7 @@ async def post_init(app: Application) -> None:
     queue.run_repeating(job_notify, interval=60, first=30)
     queue.run_repeating(job_reconcile, interval=15 * 60, first=60)
     queue.run_repeating(job_reupload, interval=24 * 3600, first=10 * 60)
-    await app.bot.set_my_commands([BotCommand("start", "Начать / меню"), BotCommand("cancel", "Отменить анкету")])
+    await app.bot.set_my_commands([BotCommand("start", "Начать / меню")])
 
 
 async def post_shutdown(app: Application) -> None:

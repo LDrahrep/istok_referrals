@@ -84,11 +84,15 @@ class FakeIo:
         self.user_messages: list[tuple[int, str, list | None]] = []
         self.answered: list[str | None] = []
         self.keyboards_removed: list[bool] = []
+        self.keyboards: list[tuple[str, list[str]]] = []
+        self.user_keyboards: list[tuple[int, str, list[str]]] = []
         self.kicks = 0
         self._next_message_id = 100
 
-    async def reply(self, text, buttons=None):
+    async def reply(self, text, buttons=None, keyboard=None):
         self.replies.append((text, buttons))
+        if keyboard is not None:
+            self.keyboards.append((text, keyboard))
 
     async def download(self, file_id):
         if file_id not in self.files:
@@ -103,8 +107,10 @@ class FakeIo:
     async def edit_admin(self, ref, text):
         self.admin_edits.append((tuple(ref), text))
 
-    async def send_user(self, tg_user_id, text, buttons=None):
+    async def send_user(self, tg_user_id, text, buttons=None, keyboard=None):
         self.user_messages.append((tg_user_id, text, buttons))
+        if keyboard is not None:
+            self.user_keyboards.append((tg_user_id, text, keyboard))
 
     async def answer_button(self, text=None, remove_keyboard=True):
         self.answered.append(text)

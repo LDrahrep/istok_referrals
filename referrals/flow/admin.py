@@ -43,7 +43,8 @@ async def _approve(db: Db, io: Io, tg_user_id: int, emplid: str, card: tuple[int
     s = await repo.load_session(db, tg_user_id) or Session(tg_user_id=tg_user_id, step=MENU)
     s.step, s.data, s.submission_key = MENU, {}, None
     await repo.save_session(db, s)
-    await io.send_user(tg_user_id, t(s.language, "welcome", name=employee.name))
+    await io.send_user(tg_user_id, t(s.language, "welcome", name=employee.name),
+                       keyboard=[t(s.language, "btn_cancel")])
     await io.send_user(tg_user_id, t(s.language, "menu"), menu_buttons(s.language))
     await io.edit_admin(card, f"✅ Подтверждено: {employee.name} ({employee.emplid})")
 

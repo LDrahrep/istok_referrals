@@ -117,3 +117,13 @@ async def test_sheet_reader_reads_status_from_configured_sheet(monkeypatch):
     monkeypatch.setattr(app_module, "open_worksheet", fake_open)
     assert await app_module.sheet_reader(CFG).hr_status("R-000001") == "Интервью"
     assert opened == [("s", "Заявки")]
+
+
+def test_reply_keyboard_markup():
+    from telegram import ReplyKeyboardMarkup
+
+    from referrals.app import _markup
+    markup = _markup(None, ["✖️ Отмена"])
+    assert isinstance(markup, ReplyKeyboardMarkup) and markup.is_persistent and markup.resize_keyboard
+    assert [b.text for b in markup.keyboard[0]] == ["✖️ Отмена"]
+    assert _markup(None, None) is None
