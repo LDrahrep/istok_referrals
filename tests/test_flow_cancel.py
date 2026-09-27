@@ -78,3 +78,14 @@ async def test_admin_approval_sends_keyboard_to_user(db):
     io = FakeIo()
     await on_admin_button(db, io, 7, frozenset({7}), f"v:111:{EMP_A}", (-100, 1))
     assert io.user_keyboards == [(111, t("ru", "welcome", name="Ivan Petrov"), [t("ru", "btn_cancel")])]
+
+
+async def test_cancel_on_language_step_returns_to_working_menu(db):
+    io = FakeIo()
+    await verified(db, io)
+    await handle_event(db, io, USER, Button("menu:language"))
+    await handle_event(db, io, USER, Text(t("ru", "btn_cancel")))
+    assert io.last_text == t("ru", "menu")
+    assert (await repo.load_session(db, 111)).step == MENU
+    await handle_event(db, io, USER, Button("menu:refer"))
+    assert io.last_text == t("ru", "ask_first_name")

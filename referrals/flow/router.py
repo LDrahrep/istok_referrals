@@ -90,8 +90,11 @@ async def _on_cancel(db: Db, io: Io, s: Session, ref: Referrer | None) -> None:
         return
     if s.step in FORM_STEPS:
         await referral.cancel_form(db, io, s)
-    else:
-        await show_menu(io, s.language)
+        return
+    # Вне анкеты (меню, выбор языка): возвращаем рабочее меню.
+    s.step, s.data, s.submission_key = MENU, {}, None
+    await repo.save_session(db, s)
+    await show_menu(io, s.language)
 
 
 async def _on_menu(db: Db, io: Io, s: Session, ref: Referrer, event: Event, sheet: SheetReader | None) -> None:
