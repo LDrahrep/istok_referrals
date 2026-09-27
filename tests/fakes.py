@@ -123,3 +123,16 @@ class FakeIo:
     def button_data(self, index: int = -1) -> list[str]:
         buttons = self.replies[index][1] or []
         return [data for row in buttons for _, data in row]
+
+
+class FakeSheetReader:
+    def __init__(self, statuses: dict[str, str] | None = None, fail: bool = False):
+        self.statuses = dict(statuses or {})
+        self.fail = fail
+        self.calls: list[str] = []
+
+    async def hr_status(self, number):
+        self.calls.append(number)
+        if self.fail:
+            raise RuntimeError("sheets down")
+        return self.statuses.get(number)

@@ -46,3 +46,8 @@ def referral_caption(referral: Referral) -> str:
         f"Работал у нас: {'Да' if referral.worked_before else 'Нет'}",
         f"Рекомендовал: {referral.referrer_name} ({referral.referrer_emplid})",
     ])
+
+
+def withdrawn_text(referral: Referral, referrer_name: str) -> str:
+    return (f"↩️ Заявка {referral.number} ({referral.first_name} {referral.last_name}) "
+            f"отозвана рекомендателем {referrer_name}")

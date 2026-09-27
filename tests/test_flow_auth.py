@@ -167,7 +167,7 @@ async def test_menu_and_language_switch(db):
     assert io.last_text == t(None, "choose_language")
     await handle_event(db, io, USER, Button("lang:en"))
     assert io.last_text == t("en", "menu")
-    assert io.button_data() == ["menu:refer", "menu:language"]
+    assert io.button_data() == ["menu:refer", "menu:mine", "menu:language"]
 
 
 async def test_start_mid_form_reprompts_and_cancel_returns_to_menu(db):

@@ -8,7 +8,9 @@ LANGUAGE_BUTTONS: Buttons = [[("Русский", "lang:ru"), ("English", "lang:e
 
 
 def menu_buttons(lang: str | None) -> Buttons:
-    return [[(t(lang, "btn_refer"), "menu:refer")], [(t(lang, "btn_language"), "menu:language")]]
+    return [[(t(lang, "btn_refer"), "menu:refer")],
+            [(t(lang, "btn_mine"), "menu:mine")],
+            [(t(lang, "btn_language"), "menu:language")]]
 
 
 def nav_row(lang: str | None) -> list[tuple[str, str]]:

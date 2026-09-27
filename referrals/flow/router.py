@@ -3,16 +3,16 @@ from __future__ import annotations
 
 from referrals import repo
 from referrals.db import Db
-from referrals.flow import auth, referral
+from referrals.flow import auth, mine, referral
 from referrals.flow.common import prompt_language, show_menu
 from referrals.flow.events import Button, Command, Event, User
-from referrals.flow.io import Io
+from referrals.flow.io import Io, SheetReader
 from referrals.flow.steps import AUTH_ADMIN_NAME, AUTH_STEPS, AUTH_WAIT_ID, FORM_STEPS, LANG, MENU
 from referrals.i18n import t
 from referrals.models import Referrer, Session
 
 
-async def handle_event(db: Db, io: Io, user: User, event: Event) -> None:
+async def handle_event(db: Db, io: Io, user: User, event: Event, sheet: SheetReader | None = None) -> None:
     s = await repo.load_session(db, user.id) or Session(tg_user_id=user.id, step=LANG)
     ref = await repo.get_referrer(db, user.id)
     if isinstance(event, Button):
@@ -43,7 +43,7 @@ async def handle_event(db: Db, io: Io, user: User, event: Event) -> None:
     elif s.step == AUTH_ADMIN_NAME:
         await auth.on_admin_name(db, io, user, s, event)
     elif s.step == MENU:
-        await _on_menu(db, io, s, event)
+        await _on_menu(db, io, s, ref, event, sheet)
     elif s.step in FORM_STEPS:
         await referral.on_form(db, io, user, s, ref, event)
     else:
@@ -84,7 +84,7 @@ async def _on_cancel(db: Db, io: Io, s: Session, ref: Referrer | None) -> None:
     await referral.cancel_form(db, io, s)
 
 
-async def _on_menu(db: Db, io: Io, s: Session, event: Event) -> None:
+async def _on_menu(db: Db, io: Io, s: Session, ref: Referrer, event: Event, sheet: SheetReader | None) -> None:
     if isinstance(event, Button):
         if event.data == "menu:refer":
             await referral.start_form(db, io, s)
@@ -93,6 +93,9 @@ async def _on_menu(db: Db, io: Io, s: Session, event: Event) -> None:
             s.step = LANG
             await repo.save_session(db, s)
             await prompt_language(io)
+            return
+        if event.data == "menu:mine" or event.data.startswith("my:"):
+            await mine.on_button(db, io, s, ref, event.data, sheet)
             return
         await io.reply(t(s.language, "stale_button"))
     await show_menu(io, s.language)
