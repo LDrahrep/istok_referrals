@@ -122,3 +122,20 @@ async def test_my_button_mid_form_is_stale(db):
     assert io.last_text == t("ru", "ask_last_name")
     session = await repo.load_session(db, 111)
     assert session.step == REF_LAST_NAME and session.data == {"first_name": "Aziz"}
+
+
+async def test_hanging_sheet_read_falls_back_to_db_copy(db, monkeypatch):
+    import time
+
+    from referrals.flow import mine
+    monkeypatch.setattr(mine, "HR_STATUS_TIMEOUT", 0.05)
+    a, _, c = await setup(db)
+    await repo.apply_sheet_feedback(db, {a.id: (None, {"Статус": "Позвонили"})})
+    io = FakeIo()
+    started = time.monotonic()
+    await press(db, io, f"my:confirm:{a.id}", FakeSheetReader({"R-000001": ""}, delay=5))
+    await press(db, io, f"my:confirm:{c.id}", FakeSheetReader({"R-000003": ""}, delay=5))
+    assert time.monotonic() - started < 2
+    assert t("ru", "withdraw_blocked") in io.texts()
+    assert (await repo.get_referral(db, a.id)).withdrawn_at is None
+    assert (await repo.get_referral(db, c.id)).withdrawn_at is not None

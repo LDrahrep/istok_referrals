@@ -192,3 +192,22 @@ async def test_referring_again_does_not_steal_withdrawn_row_with_cleared_number(
     assert sheet.column("Статус") == ["Отказ", ""]
     second = await repo.get_referral(db, 2)
     assert second.hr_data == {}
+
+
+def test_open_worksheet_sets_request_timeout(monkeypatch):
+    from referrals import sheets
+
+    class FakeClient:
+        def __init__(self):
+            self.timeout = None
+
+        def set_timeout(self, timeout):
+            self.timeout = timeout
+
+        def open_by_key(self, key):
+            return type("Book", (), {"worksheet": lambda self, name: f"ws:{key}:{name}"})()
+
+    client = FakeClient()
+    monkeypatch.setattr(sheets.gspread, "service_account_from_dict", lambda creds: client)
+    assert sheets.open_worksheet({}, "sheet-id", "Заявки") == "ws:sheet-id:Заявки"
+    assert client.timeout == sheets.GOOGLE_TIMEOUT

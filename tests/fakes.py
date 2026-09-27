@@ -132,13 +132,17 @@ class FakeIo:
 
 
 class FakeSheetReader:
-    def __init__(self, statuses: dict[str, str] | None = None, fail: bool = False):
+    def __init__(self, statuses: dict[str, str] | None = None, fail: bool = False, delay: float = 0):
         self.statuses = dict(statuses or {})
         self.fail = fail
+        self.delay = delay
         self.calls: list[str] = []
 
     async def hr_status(self, number):
         self.calls.append(number)
+        if self.delay:
+            import asyncio
+            await asyncio.sleep(self.delay)
         if self.fail:
             raise RuntimeError("sheets down")
         return self.statuses.get(number)

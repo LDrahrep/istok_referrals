@@ -1,6 +1,7 @@
 """«Мои рекомендации»: список своих заявок, карточка и отзыв. Работает на шаге MENU."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -17,6 +18,7 @@ from referrals.sheet_model import HR_STATUS_HEADER
 
 log = logging.getLogger(__name__)
 LIST_LIMIT = 20
+HR_STATUS_TIMEOUT = 10  # секунд: зависший запрос к Google не должен останавливать бота
 
 
 def _date(moment: datetime, fmt: str) -> str:
@@ -65,8 +67,8 @@ async def _hr_status(sheet: SheetReader | None, referral: Referral) -> str:
     status = None
     if sheet is not None:
         try:
-            status = await sheet.hr_status(referral.number)
-        except Exception:
+            status = await asyncio.wait_for(sheet.hr_status(referral.number), HR_STATUS_TIMEOUT)
+        except Exception:  # в том числе TimeoutError — тогда решаем по копии в базе
             log.exception("не удалось прочитать «Статус» заявки %s из таблицы", referral.number)
     if status is None:
         status = referral.hr_data.get(HR_STATUS_HEADER, "")

@@ -23,6 +23,7 @@ from referrals.sheet_model import (
 )
 
 AUTO_HEADERS = (WITHDRAWN_HEADER,)
+GOOGLE_TIMEOUT = 20  # секунд на запрос к Google Sheets: без него зависшее соединение ждёт вечно
 
 
 @dataclass
@@ -36,6 +37,7 @@ class SheetSyncReport:
 
 def open_worksheet(credentials: dict, spreadsheet_id: str, sheet_name: str) -> gspread.Worksheet:
     client = gspread.service_account_from_dict(credentials)
+    client.set_timeout(GOOGLE_TIMEOUT)
     return client.open_by_key(spreadsheet_id).worksheet(sheet_name)
 
 
