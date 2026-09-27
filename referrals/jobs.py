@@ -43,7 +43,7 @@ async def run_sheet_sync(db: Db, open_ws: Callable[[], object], alerter: Alerter
             return SheetSyncReport()
         ws = await asyncio.to_thread(open_ws)
         try:
-            report = await sync_sheet(db, ws, referrals)
+            report = await sync_sheet(db, ws, referrals, full=full)
         except SheetLayoutError as exc:
             await alerter.alert("sheet_layout", f"Таблица «Заявки»: {exc}. Запись в таблицу остановлена.")
             raise

@@ -136,19 +136,26 @@ def hr_status_from_values(values: Sequence[Sequence[str]], number: str) -> str |
     return None
 
 
-def _match_blank_row(row: Sequence[str], layout: Layout, candidates: Sequence[Referral]) -> Referral | None:
+def _match_blank_row(row: Sequence[str], layout: Layout, candidates: Sequence[Referral],
+                     by_contacts: bool) -> Referral | None:
+    """Заявка для строки с затёртым «№». Сначала по file_id (он у каждой заявки свой), затем — только при
+    полной сверке — по телефону или почте, если совпадение единственное: после отзыва кандидата могут
+    рекомендовать снова, и контакты у двух заявок совпадут."""
+    file_id = _cell(row, layout.columns[FILE_ID_HEADER]).strip()
+    if file_id:
+        by_file = [r for r in candidates if r.photo_file_id == file_id]
+        if len(by_file) == 1:
+            return by_file[0]
+    if not by_contacts:
+        return None
     phone = _cell(row, layout.columns["Телефон"]).strip()
     email = _cell(row, layout.columns["Почта"]).strip().lower()
-    file_id = _cell(row, layout.columns[FILE_ID_HEADER]).strip()
-    for referral in candidates:
-        if (phone and phone == referral.phone) or (email and email == referral.email) or (
-                file_id and file_id == referral.photo_file_id):
-            return referral
-    return None
+    by_contact = [r for r in candidates if (phone and phone == r.phone) or (email and email == r.email)]
+    return by_contact[0] if len(by_contact) == 1 else None
 
 
 def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral],
-                   photo_formulas: Sequence[str] = ()) -> tuple[Layout, ReconcilePlan]:
+                   photo_formulas: Sequence[str] = (), match_by_contacts: bool = True) -> tuple[Layout, ReconcilePlan]:
     """Что нужно дописать/исправить в таблице и что забрать из колонок «Фото» и HR."""
     layout = parse_layout(values[0] if values else [])
     id_col = layout.columns[ID_HEADER]
@@ -178,7 +185,7 @@ def plan_reconcile(values: Sequence[Sequence[str]], referrals: Sequence[Referral
     # вместо того чтобы дописывать дубль и осиротить заметки HR.
     unplaced = [r for r in referrals if r.id not in row_of and r.id not in duplicates]
     for index in blank_rows:
-        match = _match_blank_row(values[index], layout, unplaced)
+        match = _match_blank_row(values[index], layout, unplaced, match_by_contacts)
         if match is None:
             plan.unknown_numbers.append(f"без № (строка {index + 1})")
             continue

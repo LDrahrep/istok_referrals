@@ -81,14 +81,16 @@ def _photo_formulas(ws, layout: Layout, row_count: int) -> list[str]:
     return cells + [""] * (row_count - len(cells))
 
 
-async def sync_sheet(db: Db, ws, referrals: Sequence[Referral]) -> SheetSyncReport:
+async def sync_sheet(db: Db, ws, referrals: Sequence[Referral], *, full: bool = True) -> SheetSyncReport:
     """Приводит колонки бота к базе, дописывает недостающие строки, забирает «Фото» и колонки HR."""
     values = await asyncio.to_thread(ws.get_all_values)
     if await asyncio.to_thread(_ensure_auto_headers, ws, values):
         values = await asyncio.to_thread(ws.get_all_values)
     layout = parse_layout(values[0] if values else [])
     photo_formulas = await asyncio.to_thread(_photo_formulas, ws, layout, len(values))
-    layout, plan = plan_reconcile(values, referrals, photo_formulas)
+    # По контактам строки без «№» сопоставляем только при полной сверке: при дозаписи видна
+    # лишь часть заявок, и строка отозванной заявки досталась бы повторной рекомендации.
+    layout, plan = plan_reconcile(values, referrals, photo_formulas, match_by_contacts=full)
 
     if plan.cell_updates:
         data = [{"range": rowcol_to_a1(u.row + 1, u.col + 1), "values": [[u.value]]} for u in plan.cell_updates]

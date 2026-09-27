@@ -175,3 +175,20 @@ async def test_withdrawn_header_does_not_take_over_unlabeled_hr_column(db):
     header = sheet.get_all_values()[0]
     assert header.index(WITHDRAWN_HEADER) == len(old_header) + 1
     assert sheet.grid[1][len(old_header)] == "позвонить в пн"
+
+
+async def test_referring_again_does_not_steal_withdrawn_row_with_cleared_number(db):
+    [first] = await create_referrals(db, 1)
+    sheet = FakeSheet([HEADER])
+    await sync_sheet(db, sheet, [first])
+    sheet.grid[1][HEADER.index("Статус")] = "Отказ"
+    await repo.withdraw_referral(db, first.id, EMP_A)
+    sheet.grid[1][0] = ""  # HR случайно стёр №
+    draft = make_draft(phone=first.phone, email=first.email, photo_file_id="file-2")
+    await repo.create_referral(db, draft, make_photo(), Session(tg_user_id=111, step="menu"))
+    await sync_sheet(db, sheet, await repo.referrals_pending_sheet(db), full=False)
+    await sync_sheet(db, sheet, await repo.all_referrals(db))
+    assert sheet.column("№") == ["R-000001", "R-000002"]
+    assert sheet.column("Статус") == ["Отказ", ""]
+    second = await repo.get_referral(db, 2)
+    assert second.hr_data == {}

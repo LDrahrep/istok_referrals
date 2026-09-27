@@ -190,3 +190,37 @@ def test_hr_status_from_values():
     assert hr_status_from_values(values, "R-000009") is None
     assert hr_status_from_values([[h for h in HEADER if h != "Статус"]], "R-000001") is None
     assert hr_status_from_values([], "R-000001") is None
+
+
+def test_blank_row_prefers_file_id_when_contacts_repeat():
+    withdrawn = make_referral(1, photo_file_id="f-1", withdrawn_at=datetime(2026, 9, 26, 15, 0, tzinfo=timezone.utc))
+    again = make_referral(2, photo_file_id="f-2")  # тот же кандидат, рекомендован снова
+    row = sheet_row(withdrawn, status="Отказ")
+    row[0] = ""
+    _, plan = plan_reconcile([HEADER, row], [withdrawn, again])
+    assert CellUpdate(1, 0, "R-000001") in plan.cell_updates
+    assert plan.appends == [again]
+
+
+def test_blank_row_with_ambiguous_contacts_is_reported_not_matched():
+    first = make_referral(1, photo_file_id="f-1")
+    second = make_referral(2, photo_file_id="f-2")
+    row = sheet_row(first)
+    row[0] = ""
+    row[BOT_HEADERS.index("file_id")] = ""
+    _, plan = plan_reconcile([HEADER, row], [first, second])
+    assert plan.unknown_numbers == ["без № (строка 2)"]
+    assert all(u.row != 1 for u in plan.cell_updates)
+
+
+def test_push_mode_matches_blank_rows_only_by_file_id():
+    withdrawn = make_referral(1, photo_file_id="f-1")
+    again = make_referral(2, photo_file_id="f-2")
+    row = sheet_row(withdrawn, status="Отказ")
+    row[0] = ""
+    # при дозаписи видна только новая заявка: телефон совпадает, но по контактам не сопоставляем
+    _, plan = plan_reconcile([HEADER, row], [again], match_by_contacts=False)
+    assert plan.appends == [again] and all(u.row != 1 for u in plan.cell_updates)
+    # отозванная заявка тоже ждёт выгрузки — её строку узнаём по file_id, дубля нет
+    _, plan = plan_reconcile([HEADER, row], [withdrawn, again], match_by_contacts=False)
+    assert CellUpdate(1, 0, "R-000001") in plan.cell_updates and plan.appends == [again]
