@@ -824,3 +824,199 @@ Expected: PASS.
 git add referrals/app.py tests/test_app.py
 git commit -m "feat: живая проверка «Статуса» при отзыве в Telegram-адаптере" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 5: Постоянная кнопка «✖️ Отмена» внизу экрана
+
+Дизайн согласован в чате 2026-09-26: кнопка видна всегда (reply-клавиатура Telegram), в анкете отменяет черновик, в меню просто показывает меню; `/cancel` работает, но убирается из меню команд.
+
+**Files:**
+- Create: `tests/test_flow_cancel.py`
+- Modify: `referrals/flow/io.py`, `tests/fakes.py`, `referrals/flow/router.py`, `referrals/flow/auth.py`, `referrals/flow/admin.py`, `referrals/i18n/ru.py`, `referrals/i18n/en.py`, `referrals/app.py`
+
+**Interfaces:**
+- Produces: `Io.reply(text, buttons=None, keyboard: list[str] | None = None)` и `Io.send_user(tg_user_id, text, buttons=None, keyboard=None)` — при `keyboard` сообщение несёт постоянную reply-клавиатуру из одной строки кнопок; `FakeIo.keyboards` / `FakeIo.user_keyboards` — списки `(text, labels)`; `router.CANCEL_LABELS` — надписи кнопки на всех языках (`btn_cancel` ru и en).
+
+- [ ] **Step 1: FakeIo**
+
+В `tests/fakes.py` у `FakeIo`: в `__init__` поля `self.keyboards = []` и `self.user_keyboards = []`;
+```python
+    async def reply(self, text, buttons=None, keyboard=None):
+        self.replies.append((text, buttons))
+        if keyboard is not None:
+            self.keyboards.append((text, keyboard))
+
+    async def send_user(self, tg_user_id, text, buttons=None, keyboard=None):
+        self.user_messages.append((tg_user_id, text, buttons))
+        if keyboard is not None:
+            self.user_keyboards.append((tg_user_id, text, keyboard))
+```
+
+- [ ] **Step 2: Тесты (падают)**
+
+`tests/test_flow_cancel.py`:
+```python
+from referrals import repo
+from referrals.flow.admin import on_admin_button
+from referrals.flow.events import Button, Command, Text, User
+from referrals.flow.router import handle_event
+from referrals.flow.steps import AUTH_WAIT_ID, MENU
+from referrals.i18n import t
+from referrals.models import Session
+from tests.factories import EMP_A
+from tests.fakes import FakeIo
+from tests.helpers import seed_employees
+
+USER = User(id=111, username="ivan", full_name="Ivan P")
+
+
+async def verified(db, io, lang="ru"):
+    await seed_employees(db, (EMP_A, "Ivan Petrov"))
+    await handle_event(db, io, USER, Command("start"))
+    await handle_event(db, io, USER, Button(f"lang:{lang}"))
+    await handle_event(db, io, USER, Text(EMP_A))
+
+
+async def test_keyboard_appears_after_verification(db):
+    io = FakeIo()
+    await verified(db, io)
+    assert io.keyboards == [(t("ru", "welcome", name="Ivan Petrov"), [t("ru", "btn_cancel")])]
+
+
+async def test_cancel_button_mid_form_cancels_draft(db):
+    io = FakeIo()
+    await verified(db, io)
+    await handle_event(db, io, USER, Button("menu:refer"))
+    await handle_event(db, io, USER, Text("Aziz"))
+    await handle_event(db, io, USER, Text(t("ru", "btn_cancel")))
+    assert t("ru", "cancelled") in io.texts() and io.last_text == t("ru", "menu")
+    session = await repo.load_session(db, 111)
+    assert (session.step, session.data) == (MENU, {})
+
+
+async def test_cancel_button_in_menu_just_shows_menu(db):
+    io = FakeIo()
+    await verified(db, io)
+    before = len(io.replies)
+    await handle_event(db, io, USER, Text(t("ru", "btn_cancel")))
+    assert [text for text, _ in io.replies[before:]] == [t("ru", "menu")]
+
+
+async def test_cancel_label_of_other_language_works(db):
+    io = FakeIo()
+    await verified(db, io, lang="en")
+    await handle_event(db, io, USER, Button("menu:refer"))
+    await handle_event(db, io, USER, Text(t("ru", "btn_cancel")))
+    assert t("en", "cancelled") in io.texts()
+
+
+async def test_start_and_language_switch_resend_keyboard(db):
+    io = FakeIo()
+    await verified(db, io)
+    await handle_event(db, io, USER, Command("start"))
+    assert io.keyboards[-1] == (t("ru", "keyboard_hint"), [t("ru", "btn_cancel")])
+    await handle_event(db, io, USER, Button("menu:language"))
+    await handle_event(db, io, USER, Button("lang:en"))
+    assert io.keyboards[-1] == (t("en", "keyboard_hint"), [t("en", "btn_cancel")])
+    assert io.last_text == t("en", "menu")
+
+
+async def test_cancel_button_for_unverified_user_returns_to_id_prompt(db):
+    io = FakeIo()
+    await handle_event(db, io, USER, Command("start"))
+    await handle_event(db, io, USER, Button("lang:ru"))
+    await handle_event(db, io, USER, Text(t("ru", "btn_cancel")))
+    assert io.last_text == t("ru", "ask_id")
+    assert (await repo.load_session(db, 111)).step == AUTH_WAIT_ID
+
+
+async def test_admin_approval_sends_keyboard_to_user(db):
+    await seed_employees(db, (EMP_A, "Ivan Petrov"))
+    await repo.save_session(db, Session(tg_user_id=111, step=AUTH_WAIT_ID, language="ru"))
+    io = FakeIo()
+    await on_admin_button(db, io, 7, frozenset({7}), f"v:111:{EMP_A}", (-100, 1))
+    assert io.user_keyboards == [(111, t("ru", "welcome", name="Ivan Petrov"), [t("ru", "btn_cancel")])]
+```
+Run: `.venv/bin/pytest tests/test_flow_cancel.py -q` → FAIL (`keyboard_hint` нет, клавиатура не отправляется).
+
+- [ ] **Step 3: Тексты**
+
+`ru.py`: `"keyboard_hint": "Кнопка «✖️ Отмена» внизу экрана отменяет анкету в любой момент.",`
+`en.py`: `"keyboard_hint": "The “✖️ Cancel” button at the bottom cancels the form at any time.",`
+
+- [ ] **Step 4: Протокол Io**
+
+`referrals/flow/io.py`:
+```python
+    async def reply(self, text: str, buttons: Buttons | None = None, keyboard: list[str] | None = None) -> None: ...
+    async def send_user(self, tg_user_id: int, text: str, buttons: Buttons | None = None,
+                        keyboard: list[str] | None = None) -> None: ...
+```
+
+- [ ] **Step 5: Роутер**
+
+`referrals/flow/router.py`:
+```python
+CANCEL_LABELS = frozenset({t("ru", "btn_cancel"), t("en", "btn_cancel")})
+```
+В `handle_event` сразу после блока `if isinstance(event, Command): ...` добавить:
+```python
+    if isinstance(event, Text) and event.text.strip() in CANCEL_LABELS:
+        await _on_cancel(db, io, s, ref)
+        return
+```
+(импортировать `Text` из `referrals.flow.events`). `_on_cancel` для подтверждённого: анкета → `referral.cancel_form`, иначе — только меню:
+```python
+    if s.step in FORM_STEPS:
+        await referral.cancel_form(db, io, s)
+    else:
+        await show_menu(io, s.language)
+```
+В `_on_start` в ветке меню перед `show_menu`:
+```python
+    await io.reply(t(s.language, "keyboard_hint"), keyboard=[t(s.language, "btn_cancel")])
+```
+
+- [ ] **Step 6: Проверка и админ**
+
+`referrals/flow/auth.py`: в `_verify` приветствие отправлять с клавиатурой:
+`await io.reply(t(s.language, "welcome", name=name), keyboard=[t(s.language, "btn_cancel")])`;
+в `on_language` для подтверждённого перед `show_menu`:
+`await io.reply(t(lang, "keyboard_hint"), keyboard=[t(lang, "btn_cancel")])`.
+`referrals/flow/admin.py` в `_approve`:
+`await io.send_user(tg_user_id, t(s.language, "welcome", name=employee.name), keyboard=[t(s.language, "btn_cancel")])`.
+
+- [ ] **Step 7: Адаптер**
+
+`referrals/app.py`: импорт `KeyboardButton, ReplyKeyboardMarkup`; функция
+```python
+def _markup(buttons: Buttons | None, keyboard: list[str] | None):
+    if keyboard:
+        return ReplyKeyboardMarkup([[KeyboardButton(label) for label in keyboard]],
+                                   resize_keyboard=True, is_persistent=True)
+    return to_markup(buttons)
+```
+`TelegramIo.reply` и `send_user` принимают `keyboard=None` и передают `reply_markup=_markup(buttons, keyboard)`. В `post_init` меню команд — только `BotCommand("start", "Начать / меню")`.
+
+В `tests/test_app.py`:
+```python
+def test_reply_keyboard_markup():
+    from telegram import ReplyKeyboardMarkup
+    from referrals.app import _markup
+    markup = _markup(None, ["✖️ Отмена"])
+    assert isinstance(markup, ReplyKeyboardMarkup) and markup.is_persistent and markup.resize_keyboard
+    assert [b.text for b in markup.keyboard[0]] == ["✖️ Отмена"]
+    assert _markup(None, None) is None
+```
+
+- [ ] **Step 8: Весь набор**
+
+Run: `.venv/bin/pytest -q && node --test tests/gas/photos.test.js` → PASS.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add referrals tests
+git commit -m "feat: постоянная кнопка «✖️ Отмена» внизу экрана" -m "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+```
